@@ -1,0 +1,1328 @@
+"use client";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import "./birthday.css";
+import "./sales-enhancements.css";
+import "./sales-fixes.css";
+import "./sale-lock.css";
+import "./collections.css";
+type Session = {
+    token: string;
+    usuario: string;
+    nombre: string;
+    perfil: string;
+    permisos: string[];
+};
+type Product = {
+    codigo: string;
+    nombre: string;
+    unidad: string;
+    grupo: string;
+    stock: number;
+    stockMin: number;
+    precioCosto: number;
+    precioVenta: number;
+};
+type Client = {
+    id: string;
+    nombre: string;
+    apellidos: string;
+    correo: string;
+    contacto: string;
+    fechaCumpleanos: string;
+    direccion: string;
+    comentarios?: string;
+};
+type SaleItem = {
+    codigo: string;
+    nombre: string;
+    cantidad: number;
+    precioVenta: number;
+    unidad?: string;
+    factor: number;
+    unidadesSueltas: number;
+    detalleUnidad: string;
+    stock: number;
+};
+type Order = {
+    ventaId: string;
+    fecha: string;
+    cliente: string;
+    total: number;
+    itemsCount: number;
+    observaciones: string;
+    items: Array<{
+        codigo: string;
+        nombre: string;
+        cantidad: number;
+        precioUnitario: number;
+        subtotal: number;
+    }>;
+    estadoEntrega?: string;
+    fechaEntrega?: string;
+    estadoCobro?: string;
+    totalCobrado?: number;
+    saldo?: number;
+    efectivo?: number;
+    yape?: number;
+    plin?: number;
+    transferencia?: number;
+    pos?: number;
+    otros?: number;
+    fechaPromesa?: string;
+    medioPrometido?: string;
+    observacionCobro?: string;
+    codigoImpresion?: string;
+    fechaImpresion?: string;
+};
+type Summary = {
+    totalProductos: number;
+    totalMovimientos: number;
+    sinStock: number;
+    stockBajo: number;
+    cumpleanos: number;
+    totalClientes: number;
+    valorTotalInventario: number;
+};
+const menu = ["Inicio", "Clientes", "Preventa", "Pedidos y emisión", "Cobranza y rendición", "Productos e inventario", "Gestión financiera", "Reportes", "Análisis", "Configuración"];
+const icons: Record<string, string> = { Inicio: "⌂", Clientes: "♙", Preventa: "▣", "Pedidos y emisión": "▤", "Cobranza y rendición": "◉", "Productos e inventario": "□", "Gestión financiera": "↗", Reportes: "▥", Análisis: "⌁", Configuración: "⚙" };
+const modulePermissions = [
+    { label: "Inicio", key: "dashboard" },
+    { label: "Clientes", key: "clientes" },
+    { label: "Preventa", key: "ventas" },
+    { label: "Pedidos", key: "emisiones" },
+    { label: "Cobranza", key: "cobranza" },
+    { label: "Inventario", key: "inventario" },
+    { label: "Finanzas", key: "centroGerencial" },
+    { label: "Reportes", key: "reportes" },
+    { label: "Análisis", key: "analisis" },
+    { label: "Configuración", key: "configuracion" }
+];
+function defaultPermissions(profile: string) {
+    const p = String(profile || "").toUpperCase();
+    if (p === "MASTER")
+        return modulePermissions.map(x => x.key);
+    if (p === "PREVENTA")
+        return ["dashboard", "clientes", "ventas", "emisiones", "cobranza"];
+    if (p === "COMPRADOR")
+        return ["dashboard", "emisiones", "inventario", "reportes", "analisis"];
+    return ["dashboard"];
+}
+function canViewModule(session: Session, name: string) {
+    const p = session.permisos?.length ? session.permisos : defaultPermissions(session.perfil);
+    if (name === "Clientes")
+        return p.includes("clientes");
+    if (name === "Preventa")
+        return p.includes("ventas");
+    if (name === "Pedidos y emisión")
+        return p.includes("emisiones");
+    if (name === "Cobranza y rendición")
+        return p.includes("cobranza");
+    if (name === "Productos e inventario")
+        return p.includes("inventario");
+    if (name === "Reportes")
+        return p.includes("reportes");
+    if (name === "Análisis")
+        return p.includes("analisis");
+    if (name === "Gestión financiera")
+        return p.includes("centroGerencial");
+    if (name === "Configuración")
+        return p.includes("configuracion");
+    return name === "Inicio" && p.includes("dashboard");
+}
+const today = () => { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date()); const get = (type: string) => parts.find(p => p.type === type)?.value || ""; return `${get("year")}-${get("month")}-${get("day")}`; };
+const birthdayDays = (value: string) => {
+    const match = String(value || "").match(/^(?:(\d{1,2})\/(\d{1,2})\/\d{4}|\d{4}-(\d{1,2})-(\d{1,2}))/);
+    if (!match)
+        return 999;
+    const day = Number(match[1] || match[4]), monthValue = Number(match[2] || match[3]);
+    const [year, monthNow, dayNow] = today().split("-").map(Number);
+    const start = Date.UTC(year, monthNow - 1, dayNow), currentYear = Date.UTC(year, monthValue - 1, day);
+    const target = currentYear < start ? Date.UTC(year + 1, monthValue - 1, day) : currentYear;
+    return Math.round((target - start) / 86400000);
+};
+const addDays = (value: string, amount: number) => { const [y, m, d] = value.split("-").map(Number); const date = new Date(Date.UTC(y, m - 1, d + amount)); return date.toISOString().slice(0, 10); };
+const daysSince = (value: string) => {
+    const match = String(value || "").match(/^(?:(\d{1,2})\/(\d{1,2})\/(\d{4})|(\d{4})-(\d{1,2})-(\d{1,2}))/);
+    if (!match)
+        return 0;
+    const y = Number(match[3] || match[4]), m = Number(match[2] || match[5]), d = Number(match[1] || match[6]);
+    const [ty, tm, td] = today().split("-").map(Number);
+    return Math.max(0, Math.floor((Date.UTC(ty, tm - 1, td) - Date.UTC(y, m - 1, d)) / 86400000));
+};
+const month = () => today().slice(0, 7);
+const money = (n: unknown) => `S/ ${Number(n || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const cacheGet = <T,>(key: string, fallback: T): T => {
+    try {
+        return JSON.parse(localStorage.getItem(key) || "") as T;
+    }
+    catch {
+        return fallback;
+    }
+};
+const cacheSet = (key: string, value: unknown) => localStorage.setItem(key, JSON.stringify(value));
+const collectionRendition = (rows: Order[]) => {
+    const sum = (key: keyof Order) => rows.reduce((total, row) => total + Number(row[key] || 0), 0);
+    const efectivo = sum("efectivo");
+    const yape = sum("yape") + sum("plin");
+    const otros = sum("transferencia") + sum("pos") + sum("otros");
+    return {
+        fecha: today(),
+        fuente: "CACHE_COBRANZA",
+        pedidosPendientes: rows.filter(row => Number(row.totalCobrado || 0) > 0).length,
+        declarado: { efectivo, yape, otros, gastosEfectivo: 0, gastosVirtuales: 0, efectivoEsperado: efectivo },
+        validacion: null,
+    };
+};
+const READ_ONLY = new Set(["obtenerSesion", "obtenerResumen", "obtenerCatalogoProductos", "obtenerClientes", "obtenerClientesPreventa", "obtenerStock", "obtenerEmisiones", "obtenerCobranzaPedidos", "obtenerGastosOperacion", "obtenerRendicionDia", "obtenerMovimientosIngreso", "obtenerHistorial", "obtenerCentroGerencial", "obtenerPlaneamientoMensual", "obtenerContabilidadDiaria", "obtenerCurvaS", "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "obtenerListas"]);
+async function api<T>(fn: string, args: unknown[] = [], token = ""): Promise<T> {
+    const response = await fetch("/api/qaso", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fn, args, token }) });
+    const envelope = await response.json();
+    if (!response.ok || envelope.ok === false)
+        throw new Error(envelope.message || envelope.error || "No se pudo consultar Google Sheets.");
+    return envelope.resultado as T;
+}
+function Login({ onLogin }: {
+    onLogin: (s: Session) => void;
+}) {
+    const [usuario, setUsuario] = useState("master");
+    const [password, setPassword] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    async function submit(e: FormEvent) {
+        e.preventDefault();
+        setBusy(true);
+        setError("");
+        try {
+            const r = await api<Session & {
+                ok: boolean;
+                mensaje?: string;
+            }>("loginUsuario", [usuario, password]);
+            if (!r.ok)
+                throw new Error(r.mensaje || "Credenciales incorrectas");
+            cacheSet("nexoventa_session", r);
+            onLogin(r);
+        }
+        catch (x) {
+            setError(x instanceof Error ? x.message : "No se pudo iniciar sesión");
+        }
+        finally {
+            setBusy(false);
+        }
+    }
+    return <main className="login-page"><form className="login-card" onSubmit={submit}><div className="brand login-brand"><span className="brand-mark">N</span><div><strong>NexoVenta</strong><small>Operación conectada a Google Sheets</small></div></div><span className="eyebrow">ACCESO SEGURO</span><h1>Bienvenido</h1><p>Ingresa con el usuario configurado en la hoja <b>Usuarios</b>.</p><label>Usuario<input value={usuario} onChange={e => setUsuario(e.target.value)} autoComplete="username" required/></label><label>Contraseña<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required/></label>{error && <div className="form-error">{error}</div>}<button className="primary" disabled={busy}>{busy ? "Conectando…" : "Ingresar"}</button><small>Usuario inicial: master · contraseña inicial definida en Apps Script</small></form></main>;
+}
+export default function Home() {
+    const [session, setSession] = useState<Session | null>(null);
+    const [checking, setChecking] = useState(true);
+    const [active, setActive] = useState("Inicio");
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [online, setOnline] = useState(true);
+    const [toast, setToast] = useState("");
+    const [pending, setPending] = useState(0);
+    const [products, setProducts] = useState<Product[]>([]);
+    const [clients, setClients] = useState<Client[]>([]);
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [collectionRows, setCollectionRows] = useState<Order[]>([]);
+    const [summary, setSummary] = useState<Summary | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [collectionsLoading, setCollectionsLoading] = useState(false);
+    const notify = useCallback((m: string) => { setToast(m); window.setTimeout(() => setToast(""), 3200); }, []);
+    const call = useCallback(async <T,>(fn: string, args: unknown[] = []) => {
+        const visible = !READ_ONLY.has(fn);
+        if (visible)
+            setPending(n => n + 1);
+        try {
+            return await api<T>(fn, args, session?.token || "");
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : "No se pudo consultar Google Sheets.";
+            if (/sesi[oó]n expirada|vuelva a iniciar|ingrese usuario/i.test(message)) {
+                localStorage.removeItem("nexoventa_session");
+                setSession(null);
+                throw new Error("Tu sesión venció. Ingresa nuevamente para continuar.");
+            }
+            throw error;
+        }
+        finally {
+            if (visible)
+                setPending(n => Math.max(0, n - 1));
+        }
+    }, [session]);
+    const refreshClients = useCallback(async () => {
+        if (!session || !navigator.onLine)
+            return;
+        const c = await call<Client[]>("obtenerClientes", [""]);
+        setClients(c || []);
+        cacheSet("nexo_clients", c || []);
+    }, [call, session]);
+    const refreshProducts = useCallback(async () => {
+        if (!session || !navigator.onLine)
+            return;
+        const p = await call<Product[]>("obtenerCatalogoProductos");
+        setProducts(p || []);
+        cacheSet("nexo_products", p || []);
+    }, [call, session]);
+    const refreshCollections = useCallback(async () => {
+        if (!session || !navigator.onLine)
+            return;
+        setCollectionsLoading(true);
+        try {
+            const rows = await call<Order[]>("obtenerCobranzaPedidos", [{ desde: `${today().slice(0, 4)}-01-01`, hasta: today() }]);
+            setCollectionRows(rows || []);
+            cacheSet("nexo_collections", rows || []);
+        }
+        catch (e) {
+            notify(e instanceof Error ? e.message : "No se pudo cargar cobranza");
+        }
+        finally {
+            setCollectionsLoading(false);
+        }
+    }, [call, notify, session]);
+    const refresh = useCallback(async () => {
+        if (!session || !navigator.onLine)
+            return;
+        setLoading(true);
+        try {
+            if (active === "Clientes") {
+                await refreshClients();
+                notify("Clientes actualizados directamente desde Sheets");
+                return;
+            }
+            if (active === "Productos e inventario") {
+                await refreshProducts();
+                return;
+            }
+            if (active === "Cobranza y rendición") {
+                await refreshCollections();
+                return;
+            }
+            if (active === "Pedidos y emisión") {
+                const o = await call<Order[]>("obtenerCobranzaPedidos", [{ desde: "2020-01-01", hasta: today() }]);
+                setOrders(o || []);
+                cacheSet("nexo_orders", o || []);
+                return;
+            }
+            const [p, c, o, s] = await Promise.all([call<Product[]>("obtenerCatalogoProductos"), call<Client[]>("obtenerClientes", [""]), call<Order[]>("obtenerEmisiones", [{}]), call<Summary>("obtenerResumen")]);
+            setProducts(p || []);
+            setClients(c || []);
+            setOrders(o || []);
+            setSummary(s);
+            cacheSet("nexo_products", p);
+            cacheSet("nexo_clients", c);
+            cacheSet("nexo_orders", o);
+            cacheSet("nexo_summary", s);
+        }
+        catch (e) {
+            notify(e instanceof Error ? e.message : "No se pudo actualizar");
+        }
+        finally {
+            setLoading(false);
+        }
+    }, [active, call, notify, refreshClients, refreshCollections, refreshProducts, session]);
+    const syncQueue = useCallback(async () => {
+        if (!session || !navigator.onLine)
+            return;
+        const queue = cacheGet<Array<{
+            id: string;
+            payload: unknown;
+        }>>("nexo_sale_queue", []);
+        if (!queue.length)
+            return;
+        const pending = [];
+        for (const item of queue) {
+            try {
+                const r = await call<{
+                    ok: boolean;
+                    mensaje: string;
+                }>("registrarVenta", [item.payload]);
+                if (!r.ok)
+                    throw new Error(r.mensaje);
+            }
+            catch {
+                pending.push(item);
+            }
+        }
+        cacheSet("nexo_sale_queue", pending);
+        if (pending.length !== queue.length)
+            notify(`${queue.length - pending.length} preventa(s) sincronizadas`);
+    }, [call, notify, session]);
+    useEffect(() => {
+        const saved = cacheGet<Session | null>("nexoventa_session", null);
+        if (!saved?.token)
+            return setChecking(false);
+        api<Session & {
+            ok: boolean;
+        }>("obtenerSesion", [saved.token]).then(r => {
+            if (!r.ok)
+                throw new Error();
+            setSession(r);
+        }).catch(() => localStorage.removeItem("nexoventa_session")).finally(() => setChecking(false));
+    }, []);
+    useEffect(() => {
+        const state = () => setOnline(navigator.onLine);
+        state();
+        window.addEventListener("online", state);
+        window.addEventListener("offline", state);
+        if ("serviceWorker" in navigator)
+            navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+        return () => { window.removeEventListener("online", state); window.removeEventListener("offline", state); };
+    }, []);
+    useEffect(() => {
+        const isZeroNumber = (target: EventTarget | null): target is HTMLInputElement => target instanceof HTMLInputElement && target.type === "number" && Number(target.value) === 0;
+        const selectZero = (event: Event) => {
+            if (isZeroNumber(event.target))
+                event.target.select();
+        };
+        const keepZeroSelected = (event: PointerEvent) => {
+            if (!isZeroNumber(event.target))
+                return;
+            event.preventDefault();
+            event.target.select();
+        };
+        document.addEventListener("focusin", selectZero);
+        document.addEventListener("pointerup", keepZeroSelected, true);
+        return () => { document.removeEventListener("focusin", selectZero); document.removeEventListener("pointerup", keepZeroSelected, true); };
+    }, []);
+    useEffect(() => {
+        if (!session)
+            return;
+        setProducts(cacheGet("nexo_products", []));
+        setClients(cacheGet("nexo_clients", []));
+        setOrders(cacheGet("nexo_orders", []));
+        setCollectionRows(cacheGet("nexo_collections", []));
+        setSummary(cacheGet("nexo_summary", null));
+    }, [session]);
+    useEffect(() => {
+        if (session && active === "Inicio")
+            void refreshCollections();
+    }, [active, refreshCollections, session]);
+    useEffect(() => {
+        if (session)
+            refresh().then(syncQueue);
+    }, [active, session, refresh, syncQueue]);
+    useEffect(() => {
+        if (online && session)
+            syncQueue().then(refresh);
+    }, [online]);
+    useEffect(() => {
+        if (!session || canViewModule(session, active))
+            return;
+        const first = menu.find(label => canViewModule(session, label));
+        if (first)
+            setActive(first);
+    }, [active, session]);
+    async function logout() {
+        try {
+            if (session)
+                await call("cerrarSesion", [session.token]);
+        }
+        catch { }
+        localStorage.removeItem("nexoventa_session");
+        setSession(null);
+    }
+    if (checking)
+        return <main className="login-page"><div className="login-card"><h2>Conectando con Google Sheets…</h2></div></main>;
+    if (!session)
+        return <Login onLogin={s => { setSession(s); setChecking(false); }}/>;
+    const allowed = (name: string) => canViewModule(session, name);
+    const navigate = (label: string) => { setActive(label); setMobileMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    const primaryMobile = (session.perfil === "PREVENTA" ? ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"] : ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"]).filter(allowed);
+    const secondaryMobile = menu.filter(label => allowed(label) && !primaryMobile.includes(label));
+    return <main className={`app-shell role-${session.perfil.toLowerCase()} ${pending ? "is-processing" : ""}`}><aside className="sidebar"><div className="brand"><span className="brand-mark">N</span><div><strong>NexoVenta</strong><small>Google Sheets conectado</small></div></div><nav>{menu.filter(allowed).map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span>{label}</button>)}</nav><div className="profile"><span>{session.nombre.slice(0, 2).toUpperCase()}</span><div><b>{session.nombre}</b><small>{session.perfil}</small></div><button onClick={logout} title="Cerrar sesión">↪</button></div></aside><section className="workspace"><header className="topbar"><div><small>{new Date().toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long" })}</small><h1>{active}</h1></div><div className="top-actions"><span className={`sync-pill ${online ? "" : "offline"}`}>● {online ? (pending ? "Procesando solicitud…" : loading ? "Actualizando…" : "En línea · Sheets") : "Sin señal · modo local"}</span><button onClick={refresh} disabled={pending > 0}>↻ Actualizar</button></div></header><div className="content">{active === "Inicio" && <Dashboard summary={summary} orders={orders} clients={clients} receivables={collectionRows} onNavigate={navigate} session={session}/>}{active === "Clientes" && <Clients clients={clients} call={call} refresh={refresh} notify={notify} online={online}/>}{active === "Preventa" && <Sales products={products} clients={clients} call={call} refreshProducts={refreshProducts} notify={notify} online={online}/>}{active === "Pedidos y emisión" && <Orders orders={orders} call={call} refresh={refresh} notify={notify}/>}{active === "Cobranza y rendición" && <Collections rows={collectionRows} loading={collectionsLoading} load={refreshCollections} call={call} notify={notify}/>}{active === "Productos e inventario" && <Inventory products={products} call={call} refresh={refresh} notify={notify} master={session.perfil === "MASTER"}/>}{active === "Gestión financiera" && <Finance call={call} notify={notify}/>}{active === "Reportes" && <Reports call={call} notify={notify}/>}{active === "Análisis" && <Analytics call={call} notify={notify}/>}{active === "Configuración" && <Settings call={call} notify={notify} session={session}/>}</div></section><nav className="mobile-nav" aria-label="Navegación principal">{primaryMobile.map(label => <button key={label} className={`${active === label ? "active" : ""} ${label === "Preventa" ? "sale" : ""}`} onClick={() => navigate(label)} aria-label={label}><span>{icons[label]}</span><small>{label === "Pedidos y emisión" ? "Pedidos" : label}</small></button>)}<button className={secondaryMobile.includes(active) || mobileMenuOpen ? "active" : ""} onClick={() => setMobileMenuOpen(v => !v)} aria-label="Abrir más opciones" aria-expanded={mobileMenuOpen}><span>☰</span><small>Más</small></button></nav>{mobileMenuOpen && <div className="mobile-more-backdrop" onClick={() => setMobileMenuOpen(false)}><section className="mobile-more" onClick={e => e.stopPropagation()}><div className="mobile-more-head"><div><strong>Menú de NexoVenta</strong><small>{session.nombre} · {session.perfil}</small></div><button onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menú">×</button></div><div className="mobile-more-grid">{secondaryMobile.map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span><b>{label}</b></button>)}</div><button className="mobile-logout" onClick={logout}>↪ Cerrar sesión</button></section></div>}{pending > 0 && <div className="processing-banner"><i></i><span><b>Procesando solicitud</b><small>No cierres la ventana ni vuelvas a presionar el botón.</small></span></div>}{toast && <div className="toast">{toast}</div>}</main>;
+}
+function Heading({ eyebrow, title, text, children }: {
+    eyebrow: string;
+    title: string;
+    text: string;
+    children?: React.ReactNode;
+}) { return <section className="section-heading"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2><p>{text}</p></div>{children}</section>; }
+function Dashboard({ summary, orders, clients, receivables, onNavigate, session }: {
+    summary: Summary | null;
+    orders: Order[];
+    clients: Client[];
+    receivables: Order[];
+    onNavigate: (s: string) => void;
+    session: Session;
+}) {
+    const isPreventa = String(session.perfil).toUpperCase() === "PREVENTA";
+    const orderDate = (value: string) => {
+        const match = String(value || "").match(/^(?:(\d{1,2})\/(\d{1,2})\/(\d{4})|(\d{4})-(\d{1,2})-(\d{1,2}))/);
+        if (!match) return "";
+        return match[4] ? `${match[4]}-${String(match[5]).padStart(2, "0")}-${String(match[6]).padStart(2, "0")}` : `${match[3]}-${String(match[2]).padStart(2, "0")}-${String(match[1]).padStart(2, "0")}`;
+    };
+    const todayOrders = orders.filter(o => orderDate(o.fecha) === today());
+    const monthOrders = orders.filter(o => orderDate(o.fecha).startsWith(month()));
+    const salesToday = todayOrders.reduce((a, o) => a + Number(o.total || 0), 0);
+    const salesMonth = monthOrders.reduce((a, o) => a + Number(o.total || 0), 0);
+    const ticketAverage = monthOrders.length ? salesMonth / monthOrders.length : 0;
+    const [monthlyGoal, setMonthlyGoal] = useState(() => cacheGet<number>("nexo_monthly_goal", 20000));
+    const goalProgress = monthlyGoal > 0 ? Math.min(100, (salesMonth / monthlyGoal) * 100) : 0;
+    const birthdays = clients.filter(c => birthdayDays(c.fechaCumpleanos) <= 7).sort((a, b) => birthdayDays(a.fechaCumpleanos) - birthdayDays(b.fechaCumpleanos));
+    const birthdayCount = Math.max(birthdays.length, Number(summary?.cumpleanos || 0));
+    const todayCount = birthdays.filter(c => birthdayDays(c.fechaCumpleanos) === 0).length;
+    const debts = receivables.filter(o => String(o.estadoEntrega).toUpperCase() === "ENTREGADO" && Number(o.saldo || 0) > .01).sort((a, b) => daysSince(b.fechaEntrega || b.fecha) - daysSince(a.fechaEntrega || a.fecha));
+    const urgent = debts.filter(o => daysSince(o.fechaEntrega || o.fecha) >= 4);
+    const debtTotal = debts.reduce((sum, o) => sum + Number(o.saldo || 0), 0);
+    const latestByClient = new Map<string, string>();
+    orders.forEach(o => { const key = String(o.cliente || "").trim().toLowerCase(); const date = orderDate(o.fecha); if (key && date && (!latestByClient.get(key) || date > String(latestByClient.get(key)))) latestByClient.set(key, date); });
+    const inactiveClients = clients.filter(c => { const key = `${c.nombre} ${c.apellidos}`.trim().toLowerCase(); const last = latestByClient.get(key); return !last || daysSince(last) >= 30; });
+    const editGoal = () => {
+        const value = window.prompt("Meta mensual de ventas (S/)", String(monthlyGoal));
+        if (value === null) return;
+        const parsed = Number(value.replace(",", "."));
+        if (!Number.isFinite(parsed) || parsed <= 0) return;
+        setMonthlyGoal(parsed); cacheSet("nexo_monthly_goal", parsed);
+    };
+    return <div className={isPreventa ? "preventa-home" : "manager-home"}>
+        <Heading eyebrow={isPreventa ? "MI RUTA COMERCIAL" : "RESUMEN EJECUTIVO"} title={isPreventa ? `Hola, ${session.nombre.split(" ")[0]}` : "Tu operación, en una sola vista."} text={isPreventa ? "Registra pedidos rápido y revisa tu avance del día." : "Indicadores clave para tomar decisiones sin recorrer todo el sistema."}><button className="primary" onClick={() => onNavigate("Preventa")}>＋ Nuevo pedido</button></Heading>
+        {isPreventa && <section className="preventa-hero-card"><div><small>VENTAS DE HOY</small><strong>{money(salesToday)}</strong><span>{todayOrders.length} pedido(s) registrados</span></div><button onClick={() => onNavigate("Preventa")}>Crear pedido</button></section>}
+        <section className="executive-metrics">
+            <article><span>Ventas del día</span><strong>{money(salesToday)}</strong><small>{todayOrders.length} operaciones hoy</small></article>
+            <article className="goal-card"><span>Meta mensual</span><strong>{money(salesMonth)}</strong><div className="goal-progress"><i style={{ width: `${goalProgress}%` }}></i></div><small>{goalProgress.toFixed(0)}% de {money(monthlyGoal)} {!isPreventa && <button onClick={editGoal}>Editar</button>}</small></article>
+            <article><span>Cobros pendientes</span><strong>{money(debtTotal)}</strong><small>{debts.length} cliente(s) por cobrar</small></article>
+            <article><span>Ticket promedio</span><strong>{money(ticketAverage)}</strong><small>{monthOrders.length} ventas este mes</small></article>
+            <article className="inactive-card"><span>Clientes inactivos</span><strong>{inactiveClients.length}</strong><small>Sin compra en 30 días</small></article>
+        </section>
+        <div className="home-alerts">{birthdayCount > 0 && <button className="birthday-alert" onClick={() => onNavigate("Clientes")}><span className="birthday-cake">🎂</span><div><small>{todayCount ? "¡CUMPLEAÑOS DE HOY!" : "CUMPLEAÑOS PRÓXIMOS"}</small><strong>{birthdayCount}</strong><p>{birthdays.length ? birthdays.slice(0, 3).map(c => `${c.nombre} ${c.apellidos}`.trim()).join(", ") : "Revisa tu cartera de clientes"} · Toca para ver</p></div></button>}{debts.length > 0 && <button className={`receivable-alert ${urgent.length ? "urgent" : ""}`} onClick={() => onNavigate("Cobranza y rendición")}><span>⚠</span><div><small>{urgent.length ? "COBRANZAS ATRASADAS" : "CUENTAS POR COBRAR"}</small><strong>{money(debtTotal)}</strong><p>{debts.length} cliente(s) pendiente(s){urgent.length ? ` · ${urgent.length} con 4 días o más` : ""}</p></div></button>}</div>
+        {!isPreventa && <section className="manager-secondary-metrics"><article><p>Clientes registrados</p><strong>{summary?.totalClientes || clients.length}</strong><small>{inactiveClients.length} requieren seguimiento</small></article><article><p>Productos</p><strong>{summary?.totalProductos || 0}</strong><small>{summary?.stockBajo || 0} con stock bajo</small></article><article><p>Valor de inventario</p><strong>{money(summary?.valorTotalInventario)}</strong><small>{summary?.sinStock || 0} sin stock</small></article></section>}
+        <section className="panel data-panel"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Últimos pedidos registrados</p></div></div><SimpleOrders rows={orders.slice(0, isPreventa ? 5 : 8)}/></section>
+    </div>;
+}
+function Clients({ clients, call, refresh, notify, online }: {
+    clients: Client[];
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    refresh: () => Promise<void>;
+    notify: (s: string) => void;
+    online: boolean;
+}) {
+    const blank = { id: "", nombre: "", apellidos: "", correo: "", contacto: "", fechaCumpleanos: "", direccion: "", comentarios: "" };
+    const [form, setForm] = useState(blank);
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState("");
+    const [saving, setSaving] = useState(false);
+    const visible = clients.filter(c => JSON.stringify(c).toLowerCase().includes(query.toLowerCase()));
+    async function save(e: FormEvent) {
+        e.preventDefault();
+        if (saving)
+            return;
+        if (!online)
+            return notify("Para registrar clientes se requiere señal; las preventas sí funcionan offline.");
+        const norm = (x: string) => x.trim().toLowerCase().replace(/\s+/g, " ");
+        if (!form.id && clients.some(c => norm(c.nombre) === norm(form.nombre) && norm(c.apellidos) === norm(form.apellidos) && norm(c.contacto) === norm(form.contacto) && norm(c.direccion) === norm(form.direccion)))
+            return notify("Este cliente ya existe. No se enviará otro registro.");
+        setSaving(true);
+        notify("Guardando cliente en Google Sheets…");
+        try {
+            const fn = form.id ? "actualizarCliente" : "registrarCliente";
+            const r = await call<string>(fn, [{ ...form }]);
+            notify(r);
+            setOpen(false);
+            setForm(blank);
+            await refresh();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se guardó");
+        }
+        finally {
+            setSaving(false);
+        }
+    }
+    return <div><Heading eyebrow="CARTERA COMERCIAL" title="Clientes" text="Registros reales de la hoja Clientes."><button className="primary" onClick={() => { setForm(blank); setOpen(true); }}>＋ Nuevo cliente</button></Heading><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar cliente…"/></label></section><section className="panel data-panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Cumpleaños</th><th>Dirección</th><th></th></tr></thead><tbody>{visible.map(c => <tr key={c.id} className={birthdayDays(c.fechaCumpleanos) <= 7 ? "birthday-client" : ""}><td><b>{c.nombre} {c.apellidos}</b><br /><small>{c.correo || c.id}</small><br /><small>Tel. {c.contacto || "Sin teléfono"} · {c.direccion || "Sin dirección"}</small></td><td>{c.contacto}</td><td>{c.fechaCumpleanos}</td><td>{c.direccion}</td><td><button onClick={() => { setForm({ ...blank, ...c }); setOpen(true); }}>Editar</button></td></tr>)}</tbody></table></div></section>{open && <div className="modal-bg"><form className="modal client-modal" onSubmit={save}><button type="button" className="close" onClick={() => setOpen(false)}>×</button><h2>{form.id ? "Editar cliente" : "Nuevo cliente"}</h2><div className="form-row"><label>Nombres<input required value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })}/></label><label>Apellidos<input value={form.apellidos} onChange={e => setForm({ ...form, apellidos: e.target.value })}/></label></div><div className="form-row"><label>Teléfono<input required value={form.contacto} onChange={e => setForm({ ...form, contacto: e.target.value })}/></label><label>Cumpleaños<input type="date" required value={form.fechaCumpleanos.split("/").reverse().join("-")} onChange={e => setForm({ ...form, fechaCumpleanos: e.target.value })}/></label></div><label>Correo<input type="email" value={form.correo} onChange={e => setForm({ ...form, correo: e.target.value })}/></label><label>Dirección<input required value={form.direccion} onChange={e => setForm({ ...form, direccion: e.target.value })}/></label><label>Comentarios<textarea value={form.comentarios} onChange={e => setForm({ ...form, comentarios: e.target.value })}/></label><button className="primary">Guardar en Sheets</button></form></div>}</div>;
+}
+function Sales({ products, clients, call, refreshProducts, notify, online }: {
+    products: Product[];
+    clients: Client[];
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    refreshProducts: () => Promise<void>;
+    notify: (s: string) => void;
+    online: boolean;
+}) {
+    const [client, setClient] = useState(""), [clientQuery, setClientQuery] = useState(""), [clientOpen, setClientOpen] = useState(false);
+    const [query, setQuery] = useState(""), [cart, setCart] = useState<SaleItem[]>([]), [obs, setObs] = useState("");
+    const [filtersOpen, setFiltersOpen] = useState(false), [groupFilter, setGroupFilter] = useState("TODOS"), [stockFilter, setStockFilter] = useState("TODOS");
+    const [success, setSuccess] = useState<{
+        ventaId: string;
+        total: number;
+    } | null>(null), [savingSale, setSavingSale] = useState(false);
+    const cleanProducts = useMemo(() => products.filter(p => Boolean(p.nombre?.trim())), [products]);
+    const groups = useMemo(() => [...new Set(cleanProducts.map(p => p.grupo || "General"))].sort(), [cleanProducts]);
+    const visible = cleanProducts.filter(p => `${p.codigo} ${p.nombre} ${p.grupo}`.toLowerCase().includes(query.toLowerCase()) && (groupFilter === "TODOS" || p.grupo === groupFilter) && (stockFilter === "TODOS" || stockFilter === "CON_STOCK" && p.stock > 0 || stockFilter === "SIN_STOCK" && p.stock <= 0 || stockFilter === "STOCK_BAJO" && p.stock > 0 && p.stock <= p.stockMin));
+    const clientMatches = clients.filter(c => `${c.nombre} ${c.apellidos} ${c.contacto} ${c.direccion}`.toLowerCase().includes(clientQuery.toLowerCase())).slice(0, 8);
+    const selectedClient = clients.find(c => `${c.nombre} ${c.apellidos}`.trim() === client);
+    function presentation(p: Product) { const match = /(?:^|\s)[xX]\s*(\d+)(?:\s|$)/.exec(p.nombre); const factor = Math.max(1, Number(match?.[1] || 1)); const detalleUnidad = /GAL[ÓO]N|LITRO|BEBIDA|SHAMPOO/i.test(p.nombre) ? "botella" : "unidad"; return { factor, detalleUnidad }; }
+    function add(p: Product) {
+        if (p.stock <= 0)
+            return notify("Producto sin stock");
+        const info = presentation(p);
+        setCart(x => x.some(i => i.codigo === p.codigo) ? x.map(i => i.codigo === p.codigo ? (() => { const unidadesSueltas = Math.min(Math.floor(p.stock * i.factor), i.unidadesSueltas + i.factor); return { ...i, unidadesSueltas, cantidad: unidadesSueltas / i.factor }; })() : i) : [...x, { codigo: p.codigo, nombre: p.nombre, cantidad: 1, precioVenta: p.precioVenta, unidad: p.unidad, factor: info.factor, unidadesSueltas: info.factor, detalleUnidad: info.detalleUnidad, stock: p.stock }]);
+    }
+    function changeUnits(item: SaleItem, delta: number) {
+        setCart(rows => rows.flatMap(row => {
+            if (row.codigo !== item.codigo)
+                return [row];
+            const unidadesSueltas = row.unidadesSueltas + delta;
+            if (unidadesSueltas <= 0)
+                return [];
+            if (unidadesSueltas > Math.floor(row.stock * row.factor)) {
+                notify("No hay más stock disponible");
+                return [row];
+            }
+            return [{ ...row, unidadesSueltas, cantidad: unidadesSueltas / row.factor }];
+        }));
+    }
+    function removeItem(item: SaleItem) { setCart(rows => rows.filter(row => row.codigo !== item.codigo)); notify(`${item.nombre} eliminado del pedido`); }
+    function chooseClient(c: Client) { const name = `${c.nombre} ${c.apellidos}`.trim(); setClient(name); setClientQuery(name); setClientOpen(false); }
+    function resetFilters() { setQuery(""); setGroupFilter("TODOS"); setStockFilter("TODOS"); setFiltersOpen(false); }
+    async function save() {
+        if (savingSale)
+            return;
+        if (!client || !cart.length)
+            return notify("Selecciona cliente y productos");
+        const total = cart.reduce((a, i) => a + i.cantidad * i.precioVenta, 0);
+        const payload = { cliente: client, items: cart.map(i => ({ codigo: i.codigo, cantidad: i.cantidad })), observaciones: obs, solicitudId: crypto.randomUUID() };
+        if (!online) {
+            const q = cacheGet<Array<{
+                id: string;
+                payload: unknown;
+            }>>("nexo_sale_queue", []);
+            q.push({ id: payload.solicitudId, payload });
+            cacheSet("nexo_sale_queue", q);
+            setCart([]);
+            setClient("");
+            setClientQuery("");
+            resetFilters();
+            return notify("Preventa guardada; se sincronizará al recuperar señal");
+        }
+        setSavingSale(true);
+        try {
+            const r = await call<{
+                ok: boolean;
+                mensaje: string;
+                ventaId?: string;
+            }>("registrarVenta", [payload]);
+            if (!r.ok)
+                throw new Error(r.mensaje);
+            setSuccess({ ventaId: r.ventaId || "Registrada", total });
+            window.setTimeout(() => setSuccess(null), 2600);
+            setCart([]);
+            setObs("");
+            setClient("");
+            setClientQuery("");
+            setClientOpen(false);
+            resetFilters();
+            void refreshProducts();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se registró");
+        }
+        finally {
+            setSavingSale(false);
+        }
+    }
+    return <div><Heading eyebrow="VENTA MÓVIL" title="Nueva preventa" text="Productos y stock consultados desde Sheets; funciona con cola offline."/><div className={`sales-layout ${savingSale ? "sale-locked" : ""}`} aria-busy={savingSale}><section className="product-browser"><div className="client-finder"><span>CLIENTE DE LA PREVENTA</span><label>⌕<input value={clientQuery} onFocus={() => setClientOpen(true)} onBlur={() => window.setTimeout(() => setClientOpen(false), 160)} onChange={e => { setClientQuery(e.target.value); setClient(""); setClientOpen(true); }} placeholder="Buscar por nombre, teléfono o dirección…"/></label>{clientOpen && <div className="client-results">{clientMatches.map(c => <button key={c.id} onClick={() => chooseClient(c)}><b>{c.nombre} {c.apellidos}</b><small>{c.contacto} · {c.direccion}</small></button>)}{!clientMatches.length && <p>No se encontraron clientes</p>}</div>}{selectedClient && <div className="selected-client"><b>✓ {client}</b><span>Tel. {selectedClient.contacto} · {selectedClient.direccion}</span></div>}</div><div className="product-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar producto…"/></label><button className={filtersOpen || groupFilter !== "TODOS" || stockFilter !== "TODOS" ? "active" : ""} onClick={() => setFiltersOpen(x => !x)}>☷ Filtros</button></div>{filtersOpen && <div className="filter-panel"><label>Grupo<select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}><option value="TODOS">Todos los grupos</option>{groups.map(g => <option key={g}>{g}</option>)}</select></label><label>Stock<select value={stockFilter} onChange={e => setStockFilter(e.target.value)}><option value="CON_STOCK">Solo con stock</option><option value="STOCK_BAJO">Stock bajo</option><option value="SIN_STOCK">Sin stock</option><option value="TODOS">Todos</option></select></label><button onClick={resetFilters}>Restablecer filtros</button></div>}<small className="result-count">{visible.length} producto(s) encontrados</small><div className="product-grid">{visible.map(p => { const info = presentation(p); return <button key={p.codigo} onClick={() => add(p)}><span>{p.grupo}</span><b>{p.nombre}</b><small>{p.codigo} · Stock {p.stock} {p.unidad}</small>{info.factor > 1 && <small>Venta suelta: 1 de {info.factor} {info.detalleUnidad}s</small>}<strong>{money(p.precioVenta)}</strong></button>; })}</div></section><aside className="cart-v2"><div className="cart-title"><div><h3>Pedido actual</h3><p>{client || "Sin cliente"}</p></div><span>{cart.length}</span></div><div className="cart-items">{cart.map(i => <article key={i.codigo}><div><b>{i.nombre}</b><small>{i.codigo}</small>{i.factor > 1 && <small>{i.unidadesSueltas} {i.detalleUnidad}{i.unidadesSueltas === 1 ? "" : "s"} = {Number(i.cantidad.toFixed(4))} paquete(s)</small>}</div><button aria-label={`Quitar una ${i.detalleUnidad}`} onClick={() => changeUnits(i, -1)}>−1</button><strong>{i.factor > 1 ? i.unidadesSueltas : i.cantidad}</strong><button aria-label={`Agregar una ${i.detalleUnidad}`} onClick={() => changeUnits(i, 1)}>＋1</button><em>{money(i.cantidad * i.precioVenta)}</em><button className="remove-cart-item" title="Eliminar material" aria-label={`Eliminar ${i.nombre} del pedido`} onClick={() => removeItem(i)}>×</button></article>)}</div><textarea value={obs} onChange={e => setObs(e.target.value)} placeholder="Observaciones"/><div className="cart-total"><span>Total</span><strong>{money(cart.reduce((a, i) => a + i.cantidad * i.precioVenta, 0))}</strong></div><button className="primary finish-sale" onClick={save} disabled={savingSale}>{savingSale ? "Registrando preventa…" : online ? "Guardar en Sheets" : "Guardar sin señal"}</button></aside></div>{success && <div className="sale-success" onClick={() => setSuccess(null)}><div className="success-rays"></div><section><span>✓</span><h2>¡Preventa registrada!</h2><strong>{money(success.total)}</strong><p>{success.ventaId}</p><small>Guardada correctamente en Google Sheets</small></section></div>}</div>;
+}
+function SimpleOrders({ rows, onDetail, showEmission = false }: {
+    rows: Order[];
+    onDetail?: (o: Order) => void;
+    showEmission?: boolean;
+}) { const [stateFilter, setStateFilter] = useState("TODOS"); const [emissionFilter, setEmissionFilter] = useState("TODAS"); const [clientFilter, setClientFilter] = useState("TODOS"); const clients = [...new Set(rows.map(o => o.cliente).filter(Boolean))].sort(); const states = [...new Set(rows.map(o => String(o.estadoEntrega || "POR COMPRAR").toUpperCase()))].sort(); const filtered = showEmission ? rows.filter(o => (stateFilter === "TODOS" || String(o.estadoEntrega || "POR COMPRAR").toUpperCase() === stateFilter) && (emissionFilter === "TODAS" || (emissionFilter === "EMITIDA" ? Boolean(o.codigoImpresion) : !o.codigoImpresion)) && (clientFilter === "TODOS" || o.cliente === clientFilter)) : rows; return <>{showEmission && <section className="quick-filters"><label>Estado<select value={stateFilter} onChange={e => setStateFilter(e.target.value)}><option value="TODOS">Todos</option>{states.map(s => <option key={s}>{s}</option>)}</select></label><label>Boleta<select value={emissionFilter} onChange={e => setEmissionFilter(e.target.value)}><option value="TODAS">Todas</option><option value="EMITIDA">Emitida</option><option value="NO EMITIDA">No emitida</option></select></label><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos los clientes</option>{clients.map(c => <option key={c}>{c}</option>)}</select></label><button onClick={() => { setStateFilter("TODOS"); setEmissionFilter("TODAS"); setClientFilter("TODOS"); }}>Limpiar filtros</button></section>}<div className="table-wrap"><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Fecha</th><th>Items</th><th>Total</th><th>Estado</th>{showEmission && <th>Boleta</th>}<th></th></tr></thead><tbody>{filtered.map(o => <tr key={o.ventaId}><td><b>{o.ventaId}</b></td><td>{o.cliente}</td><td>{o.fecha}</td><td>{o.itemsCount}</td><td><b>{money(o.total)}</b></td><td><span className={`table-status status-${String(o.estadoEntrega || "POR COMPRAR").toLowerCase().replace(/\s+/g, "-")}`}>{o.estadoEntrega || "POR COMPRAR"}</span></td>{showEmission && <td>{o.codigoImpresion ? <span className="emission-tag emitted" title={`Emitida ${o.fechaImpresion || ""}`}>✓ EMITIDA<small>{o.codigoImpresion}</small></span> : <span className="emission-tag">NO EMITIDA</span>}</td>}<td>{onDetail && <button onClick={() => onDetail(o)}>Ver detalle</button>}</td></tr>)}</tbody></table></div></>; }
+function Orders({ orders, call, refresh, notify }: {
+    orders: Order[];
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    refresh: () => Promise<void>;
+    notify: (s: string) => void;
+}) {
+    const [detail, setDetail] = useState<Order | null>(null);
+    const [query, setQuery] = useState("");
+    const [printing, setPrinting] = useState(false);
+    const [orderStatus, setOrderStatus] = useState("TODOS");
+    const [orderEmission, setOrderEmission] = useState("TODAS");
+    const [orderClient, setOrderClient] = useState("TODOS");
+    const states = ["POR COMPRAR", "COMPRADO", "LISTO PARA ENTREGA", "OBSERVADO"];
+    const orderClients = [...new Set(orders.map(o => o.cliente).filter(Boolean))].sort();
+    const visible = orders.filter(o => JSON.stringify(o).toLowerCase().includes(query.toLowerCase()) && (orderStatus === "TODOS" || String(o.estadoEntrega || "POR COMPRAR").toUpperCase() === orderStatus) && (orderEmission === "TODAS" || (orderEmission === "EMITIDA" ? Boolean(o.codigoImpresion) : !o.codigoImpresion)) && (orderClient === "TODOS" || o.cliente === orderClient));
+    async function status(o: Order, value: string) {
+        try {
+            let message = "";
+            try {
+                message = await call<string>("actualizarEstadoOperativoPedido", [{ ventaId: o.ventaId, cliente: o.cliente, totalPedido: o.total, estado: value }]);
+            }
+            catch (first) {
+                const reason = first instanceof Error ? first.message : "";
+                if (!/operaci[oó]n no permitida/i.test(reason))
+                    throw first;
+                if (Number(o.totalCobrado || 0) > .01)
+                    throw new Error("Actualiza Apps Script antes de cambiar el estado de un pedido que ya tiene cobros.");
+                message = await call<string>("guardarCobranzaPedido", [{ ventaId: o.ventaId, cliente: o.cliente, totalPedido: 0, estadoEntrega: value, estadoPago: "PENDIENTE", efectivo: 0, yape: 0, plin: 0, transferencia: 0, pos: 0, otros: 0, observacion: "ESTADO OPERATIVO" }]);
+            }
+            notify(message || `Estado actualizado: ${value}`);
+            setDetail(null);
+            await refresh();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se actualizó");
+        }
+    }
+    async function printOrder(o: Order) {
+        if (printing)
+            return;
+        setPrinting(true);
+        try {
+            const r = await call<{
+                ok: boolean;
+                mensaje?: string;
+                codigo?: string;
+            }>("generarCodigoImpresion", [o.ventaId]);
+            if (!r.ok)
+                throw new Error(r.mensaje || "No se pudo emitir la boleta");
+            notify(`${o.codigoImpresion ? "Boleta reimpresa" : "Boleta emitida"}: ${r.codigo || ""}`);
+            setDetail({ ...o, codigoImpresion: r.codigo || o.codigoImpresion });
+            window.setTimeout(() => window.print(), 120);
+            await refresh();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se pudo imprimir");
+        }
+        finally {
+            setPrinting(false);
+        }
+    }
+    return <div><Heading eyebrow="OPERACIÓN Y DESPACHO" title="Pedidos y emisión" text="Controla la compra, preparación y emisión de cada pedido."/><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar pedido…"/></label></section><section className="panel data-panel"><SimpleOrders rows={visible} onDetail={setDetail} showEmission/></section>{detail && <div className="modal-bg"><section className="order-detail"><button className="close" onClick={() => setDetail(null)}>×</button><h2>{detail.ventaId}</h2><p>{detail.cliente} · {detail.fecha}</p><label>Estado operativo<select value={detail.estadoEntrega || "POR COMPRAR"} onChange={e => status(detail, e.target.value)}>{states.map(s => <option key={s}>{s}</option>)}</select></label><div className={`emission-summary ${detail.codigoImpresion ? "emitted" : ""}`}><b>{detail.codigoImpresion ? "✓ Boleta emitida" : "Boleta no emitida"}</b>{detail.codigoImpresion && <small>{detail.codigoImpresion} · {detail.fechaImpresion}</small>}</div><h3>Materiales asociados</h3><div className="detail-items">{detail.items.map(i => <div className="detail-row" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo}</small></span><span>{i.cantidad}</span><span>{money(i.precioUnitario)}</span><span><b>{money(i.subtotal)}</b></span></div>)}</div><div className="detail-total"><span>Total</span><strong>{money(detail.total)}</strong></div><button disabled={printing} onClick={() => printOrder(detail)}>{printing ? "Emitiendo…" : detail.codigoImpresion ? "Reimprimir boleta" : "Emitir e imprimir boleta"}</button></section></div>}</div>;
+}
+function Collections({ rows, loading, load, call, notify }: {
+    rows: Order[];
+    loading: boolean;
+    load: () => Promise<void>;
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    notify: (s: string) => void;
+}) {
+    const [selected, setSelected] = useState<Order | null>(null);
+    const [saving, setSaving] = useState(false);
+    const [paymentFilter, setPaymentFilter] = useState("TODOS");
+    const [deliveryFilter, setDeliveryFilter] = useState("TODAS");
+    const [clientFilter, setClientFilter] = useState("TODOS");
+    const collectionClients = [...new Set(rows.map(o => o.cliente).filter(Boolean))].sort();
+    const [form, setForm] = useState({ entregado: false, fechaEntrega: today(), cobrado: false, efectivo: 0, yape: 0, transferencia: 0, fechaPromesa: "", observacion: "" });
+    function status(o: Order) { const paid = Number(o.totalCobrado || 0), total = Number(o.total || 0); return paid >= total - .01 ? "CANCELADO" : paid > .01 ? "COBRADO PARCIAL" : "PENDIENTE"; }
+    const filteredRows = rows.filter(o => (paymentFilter === "TODOS" || status(o) === paymentFilter) && (deliveryFilter === "TODAS" || (deliveryFilter === "ENTREGADO" ? String(o.estadoEntrega).toUpperCase() === "ENTREGADO" : String(o.estadoEntrega).toUpperCase() !== "ENTREGADO")) && (clientFilter === "TODOS" || o.cliente === clientFilter));
+    const deliveredDebts = rows.filter(o => String(o.estadoEntrega).toUpperCase() === "ENTREGADO" && Number(o.saldo || 0) > .01);
+    const promisedDebts = deliveredDebts.filter(o => Boolean(o.fechaPromesa));
+    const overduePromises = promisedDebts.filter(o => String(o.fechaPromesa).slice(0, 10) < today());
+    const fourDayDebts = deliveredDebts.filter(o => daysSince(o.fechaEntrega || o.fecha) >= 4);
+    const sumAmount = (source: Order[], field: keyof Order) => source.reduce((total, row) => total + Number(row[field] || 0), 0);
+    const cashCollected = rows.reduce((total, row) => total + Number(row.efectivo || 0), 0);
+    const yapeCollected = rows.reduce((total, row) => total + Number(row.yape || 0) + Number(row.plin || 0), 0);
+    function open(o: Order) { setSelected(o); setForm({ entregado: String(o.estadoEntrega).toUpperCase() === "ENTREGADO", fechaEntrega: o.fechaEntrega || today(), cobrado: Number(o.totalCobrado || 0) > 0, efectivo: Number(o.efectivo || 0), yape: Number(o.yape || 0), transferencia: Number(o.transferencia || 0), fechaPromesa: o.fechaPromesa || "", observacion: o.observacionCobro || "" }); }
+    async function save(e: FormEvent) {
+        e.preventDefault();
+        if (!selected || saving)
+            return;
+        const efectivo = form.cobrado ? Number(form.efectivo || 0) : 0, yape = form.cobrado ? Number(form.yape || 0) : 0, transferencia = form.cobrado ? Number(form.transferencia || 0) : 0, paid = efectivo + yape + transferencia + Number(selected.plin || 0) + Number(selected.pos || 0) + Number(selected.otros || 0), balance = Math.max(0, selected.total - paid);
+        if (paid > selected.total + .01)
+            return notify("El cobro supera el total de la venta.");
+        if (form.entregado && !form.fechaEntrega)
+            return notify("Indica la fecha de entrega.");
+        if (form.entregado && balance > .01 && !form.fechaPromesa)
+            return notify("Indica el compromiso de pago del saldo.");
+        if (form.fechaPromesa && (form.fechaPromesa < today() || form.fechaPromesa > addDays(today(), 2)))
+            return notify("El compromiso debe estar entre hoy y un máximo de 2 días.");
+        setSaving(true);
+        try {
+            const message = await call<string>("guardarCobranzaPedido", [{ ...selected, ventaId: selected.ventaId, cliente: selected.cliente, totalPedido: selected.total, estadoEntrega: form.entregado ? "ENTREGADO" : "NO ENTREGADO", fechaEntrega: form.fechaEntrega, estadoPago: balance <= .01 ? "TOTAL" : paid > 0 ? "PARCIAL" : "PENDIENTE", efectivo, yape, transferencia, plin: selected.plin || 0, pos: selected.pos || 0, otros: selected.otros || 0, fechaPromesa: balance > .01 && form.entregado ? form.fechaPromesa : "", medioPrometido: balance > .01 ? "POR CONFIRMAR" : "", observacion: form.observacion }]);
+            if (!/correctamente/i.test(message))
+                return notify(message);
+            notify(message);
+            setSelected(null);
+            await load();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se guardó");
+        }
+        finally {
+            setSaving(false);
+        }
+    }
+    return <div><Heading eyebrow="OPERACIÓN" title="Cobranza y rendición" text="Entrega, cobros por múltiples medios, saldos y compromisos."><button onClick={load}>{loading ? "Actualizando…" : "↻ Actualizar"}</button></Heading><section className="quick-filters"><label>Estado de cobro<select value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)}><option value="TODOS">Todos</option><option>PENDIENTE</option><option>COBRADO PARCIAL</option><option>CANCELADO</option></select></label><label>Entrega<select value={deliveryFilter} onChange={e => setDeliveryFilter(e.target.value)}><option value="TODAS">Todas</option><option value="ENTREGADO">Entregado</option><option value="PENDIENTE">Pendiente</option></select></label><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos los clientes</option>{collectionClients.map(c => <option key={c}>{c}</option>)}</select></label><button onClick={() => { setPaymentFilter("TODOS"); setDeliveryFilter("TODAS"); setClientFilter("TODOS"); }}>Limpiar filtros</button></section>
+    <section className="collection-summary">
+    <article><span>Por cobrar total</span><strong>{money(sumAmount(rows, "saldo"))}</strong><small>{rows.filter(o => Number(o.saldo || 0) > .01).length} pedido(s) con saldo</small></article>
+    <article className="cash"><span>Cobrado en efectivo</span><strong>{money(cashCollected)}</strong><small>Importe registrado en cobranza</small></article>
+    <article className="digital"><span>Cobrado en Yape / Plin</span><strong>{money(yapeCollected)}</strong><small>Pagos digitales registrados</small></article>
+    <article className="commitment"><span>Compromisos por pagar</span><strong>{money(sumAmount(promisedDebts, "saldo"))}</strong><small>{promisedDebts.length} pedido(s) entregado(s)</small></article>
+    <article className={overduePromises.length ? "warning" : ""}><span>Compromisos vencidos</span><strong>{money(sumAmount(overduePromises, "saldo"))}</strong><small>{overduePromises.length} compromiso(s) fuera de fecha</small></article>
+    <article className={fourDayDebts.length ? "danger" : ""}><span>Deuda de 4 días o más</span><strong>{money(sumAmount(fourDayDebts, "saldo"))}</strong><small>{fourDayDebts.length} pedido(s) entregado(s)</small></article>
+    </section>
+    <section className="panel data-panel"><div className="table-wrap"><table>
+    <thead><tr><th>Pedido / boleta</th><th>Cliente</th><th>Entrega</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estado de cobro</th><th>Compromiso</th><th></th></tr></thead>
+    <tbody>{filteredRows.map(o => {
+            const age = daysSince(o.fechaEntrega || o.fecha), debt = String(o.estadoEntrega).toUpperCase() === "ENTREGADO" && Number(o.saldo || 0) > .01;
+            return <tr key={o.ventaId} className={debt && age >= 4 ? "overdue-row" : ""}>
+            <td><b>{o.ventaId}</b><br /><small>{o.codigoImpresion ? `Boleta: ${o.codigoImpresion}` : "Boleta no emitida"}</small></td><td><b>{o.cliente}</b></td>
+            <td><span className={`delivery-tag ${String(o.estadoEntrega).toUpperCase() === "ENTREGADO" ? "delivered" : ""}`}>{String(o.estadoEntrega).toUpperCase() === "ENTREGADO" ? "ENTREGADO" : "PENDIENTE"}</span>{debt && <small>{age} día(s) desde entrega</small>}</td><td>{money(o.total)}</td><td>{money(o.totalCobrado)}</td><td><b>{money(o.saldo)}</b></td><td><span className={`payment-tag ${status(o).toLowerCase().replace(" ", "-")}`}>{status(o)}</span></td><td>{o.fechaPromesa || "—"}</td><td><button onClick={() => open(o)}>Gestionar</button></td></tr>;
+        })}</tbody></table></div></section>{selected && <div className="modal-bg"><form className="collection-modal" onSubmit={save}><button type="button" className="close" onClick={() => setSelected(null)}>×</button><span className="eyebrow">COBRANZA DEL PEDIDO</span><h2>{selected.ventaId}</h2><p>{selected.cliente} · Total {money(selected.total)}</p><div className="delivery-box"><label><input type="checkbox" checked={form.entregado} onChange={e => setForm({ ...form, entregado: e.target.checked })}/> Productos entregados</label>{form.entregado && <label>Fecha de entrega<input type="date" value={form.fechaEntrega} onChange={e => setForm({ ...form, fechaEntrega: e.target.value })}/></label>}</div><label>¿Se recibió un cobro?<select value={form.cobrado ? "SI" : "NO"} onChange={e => setForm({ ...form, cobrado: e.target.value === "SI" })}><option value="NO">No, queda pendiente</option><option value="SI">Sí, registrar medios de pago</option></select></label>{form.cobrado && <><p className="payment-help">Distribuye el monto recibido. Puedes combinar efectivo, Yape y transferencia CCI.</p><div className="payment-grid"><label>Efectivo<input type="number" min="0" step=".01" value={form.efectivo} onChange={e => setForm({ ...form, efectivo: Number(e.target.value) })}/></label><label>Yape<input type="number" min="0" step=".01" value={form.yape} onChange={e => setForm({ ...form, yape: Number(e.target.value) })}/></label><label>Transferencia CCI<input type="number" min="0" step=".01" value={form.transferencia} onChange={e => setForm({ ...form, transferencia: Number(e.target.value) })}/></label></div></>}<div className="payment-balance"><span>Cobrado</span><b>{money((form.cobrado ? form.efectivo + form.yape + form.transferencia : 0) + Number(selected.plin || 0) + Number(selected.pos || 0) + Number(selected.otros || 0))}</b><span>Saldo</span><strong>{money(Math.max(0, selected.total - ((form.cobrado ? form.efectivo + form.yape + form.transferencia : 0) + Number(selected.plin || 0) + Number(selected.pos || 0) + Number(selected.otros || 0))))}</strong></div>{form.entregado && selected.total - ((form.cobrado ? form.efectivo + form.yape + form.transferencia : 0) + Number(selected.plin || 0) + Number(selected.pos || 0) + Number(selected.otros || 0)) > .01 && <label>Compromiso de pago (máximo 2 días)<input type="date" min={today()} max={addDays(today(), 2)} required value={form.fechaPromesa} onChange={e => setForm({ ...form, fechaPromesa: e.target.value })}/></label>}<label>Observación<textarea value={form.observacion} onChange={e => setForm({ ...form, observacion: e.target.value })}/></label><button className="primary" disabled={saving}>{saving ? "Guardando…" : "Confirmar gestión"}</button></form></div>}</div>;
+}
+function Inventory({ products, call, refresh, notify, master }: {
+    products: Product[];
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    refresh: () => Promise<void>;
+    notify: (s: string) => void;
+    master: boolean;
+}) {
+    const tabs = ["Inventario", "Registrar material", "Ingresar stock", "Carga masiva", "Editar", "Historial"] as const;
+    const [tab, setTab] = useState<(typeof tabs)[number]>("Inventario"), [query, setQuery] = useState(""), [history, setHistory] = useState<any[]>([]), [selected, setSelected] = useState<Product | null>(null);
+    const [productForm, setProductForm] = useState({ codigo: "", nombre: "", unidad: "Unidades", grupo: "General", stockMin: 0, precioCosto: 0, precioVenta: 0 });
+    const [lists, setLists] = useState({ unidades: ["Unidades"], grupos: ["General"] });
+    const [income, setIncome] = useState({ codigo: "", fecha: today(), tipo: "INGRESO", cantidad: 1, observaciones: "" });
+    const activeProducts = useMemo(() => products.filter(p => Boolean(p.nombre?.trim())), [products]);
+    const nextCode = useMemo(() => {
+        const codes = activeProducts.map(p => /^(.*?)(\d+)$/.exec(p.codigo.trim())).filter(Boolean) as RegExpExecArray[];
+        if (!codes.length)
+            return "PT00001";
+        const sample = codes.reduce((best, item) => Number(item[2]) > Number(best[2]) ? item : best, codes[0]);
+        return `${sample[1]}${String(Number(sample[2]) + 1).padStart(sample[2].length, "0")}`;
+    }, [activeProducts]);
+    const visible = activeProducts.filter(p => JSON.stringify(p).toLowerCase().includes(query.toLowerCase()));
+    const loadHistory = useCallback(async () => {
+        try {
+            setHistory(await call<any[]>("obtenerHistorial", [{}]));
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se pudo cargar el historial");
+        }
+    }, [call, notify]);
+    useEffect(() => {
+        if (tab === "Historial")
+            loadHistory();
+    }, [loadHistory, tab]);
+    useEffect(() => {
+        if (tab === "Registrar material" && !productForm.codigo.trim())
+            setProductForm(f => ({ ...f, codigo: nextCode }));
+    }, [nextCode, productForm.codigo, tab]);
+    useEffect(() => {
+        call<{
+            unidades: string[];
+            grupos: string[];
+        }>("obtenerListas").then(r => setLists({ unidades: r.unidades?.length ? r.unidades : ["Unidades"], grupos: r.grupos?.length ? r.grupos : ["General"] })).catch(() => undefined);
+    }, [call]);
+    async function create(e: FormEvent) {
+        e.preventDefault();
+        const codigo = productForm.codigo.trim().toUpperCase();
+        const payload = { ...productForm, codigo, nombre: productForm.nombre.trim() };
+        const existing = products.find(p => p.codigo.trim().toUpperCase() === codigo);
+        if (existing?.nombre?.trim()) {
+            notify(`El código ${codigo} ya pertenece a “${existing.nombre}”. Usa Editar o ingresa otro código.`);
+            return;
+        }
+        try {
+            const message = existing
+                ? await call<string>("actualizarProducto", [{ ...existing, ...payload, codigoOriginal: existing.codigo }])
+                : await call<string>("registrarProducto", [payload]);
+            if (!/correctamente|actualizado/i.test(message)) {
+                notify(message);
+                return;
+            }
+            notify(existing ? `Material ${codigo} completado en la fila existente de Sheets.` : message);
+            setProductForm({ codigo: "", nombre: "", unidad: "Unidades", grupo: "General", stockMin: 0, precioCosto: 0, precioVenta: 0 });
+            await refresh();
+            setTab("Inventario");
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se registró el material");
+        }
+    }
+    async function saveIncome(e: FormEvent) {
+        e.preventDefault();
+        const code = income.codigo.trim().toUpperCase();
+        if (!activeProducts.some(p => p.codigo.toUpperCase() === code))
+            return notify("Selecciona un material válido del buscador.");
+        try {
+            const message = await call<string>("registrarMovimiento", [{ ...income, codigo: code }]);
+            if (!/correctamente|registrado/i.test(message))
+                return notify(message);
+            notify(message);
+            await refresh();
+            setIncome({ codigo: "", fecha: today(), tipo: "INGRESO", cantidad: 1, observaciones: "" });
+            setTab("Inventario");
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se registró el ingreso");
+        }
+    }
+    async function saveEdit(e: FormEvent) {
+        e.preventDefault();
+        if (!selected)
+            return;
+        try {
+            notify(await call<string>("actualizarProducto", [{ ...selected, codigoOriginal: selected.codigo }]));
+            await refresh();
+            setSelected(null);
+            setTab("Inventario");
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se actualizó");
+        }
+    }
+    function downloadTemplate() { const content = "codigo;tipo;cantidad;factor;costo;fecha;observacion\nMAT-001;INGRESO;10;1;15.50;" + today() + ";Ingreso inicial"; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" })); a.download = "plantilla-carga-materiales.csv"; a.click(); }
+    async function upload(file?: File) {
+        if (!file)
+            return;
+        const text = await file.text(), lines = text.split(/\r?\n/).filter(Boolean), sep = lines[0]?.includes(";") ? ";" : ",";
+        const headers = lines.shift()?.split(sep).map(x => x.trim().toLowerCase()) || [];
+        const rows = lines.map((line, i) => { const v = line.split(sep); const get = (name: string) => v[headers.indexOf(name)] || ""; return { filaExcel: i + 2, codigo: get("codigo") || get("código"), tipo: get("tipo") || "INGRESO", cantidadCarga: Number(get("cantidad")), factor: Number(get("factor") || 1), costoCompra: Number(get("costo") || 0), fecha: get("fecha") || today(), observacion: get("observacion") || "Carga masiva NexoVenta" }; });
+        try {
+            const check = await call<any>("validarCargaMasivaInventario", [rows]);
+            if (!check.ok)
+                return notify(check.mensaje);
+            if (!confirm(check.mensaje + "\n¿Importar ahora?"))
+                return;
+            const result = await call<any>("importarCargaMasivaInventario", [rows]);
+            notify(result.mensaje);
+            await refresh();
+            setTab("Inventario");
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se importó");
+        }
+    }
+    const table = <section className="panel data-panel"><div className="table-wrap"><table><thead><tr><th>SKU</th><th>Material</th><th>Grupo</th><th>Stock</th><th>Mínimo</th><th>Costo</th><th>Venta</th><th></th></tr></thead><tbody>{visible.map(p => <tr key={p.codigo}><td><b>{p.codigo}</b></td><td>{p.nombre}<br /><small>{p.unidad}</small></td><td>{p.grupo}</td><td><b>{p.stock}</b></td><td>{p.stockMin}</td><td>{money(p.precioCosto)}</td><td>{money(p.precioVenta)}</td><td>{master && <button onClick={() => { setSelected({ ...p }); setTab("Editar"); }}>Editar</button>}</td></tr>)}</tbody></table></div></section>;
+    return <div><Heading eyebrow="MATERIALES Y ALMACÉN" title="Materiales" text="Creación, ingresos, carga masiva, edición, inventario e historial conectados a Sheets."/><div className="materials-tabs">{tabs.map(x => <button key={x} className={tab === x ? "active" : ""} onClick={() => setTab(x)}>{x}</button>)}</div>
+    {tab === "Inventario" && <><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar material, SKU o grupo…"/></label><button onClick={refresh}>↻ Actualizar</button></section>{table}</>}
+    {tab === "Registrar material" && <form className="panel material-form" onSubmit={create}><h3>Registrar nuevo material</h3><div className="form-row"><label>Código<input required value={productForm.codigo} onChange={e => setProductForm({ ...productForm, codigo: e.target.value })}/></label><label>Nombre<input required value={productForm.nombre} onChange={e => setProductForm({ ...productForm, nombre: e.target.value })}/></label></div><div className="form-row"><label>Unidad<select required value={productForm.unidad} onChange={e => setProductForm({ ...productForm, unidad: e.target.value })}>{lists.unidades.map(x => <option key={x}>{x}</option>)}</select></label><label>Grupo<select required value={productForm.grupo} onChange={e => setProductForm({ ...productForm, grupo: e.target.value })}>{lists.grupos.map(x => <option key={x}>{x}</option>)}</select></label></div><div className="form-row"><label>Stock mínimo<input type="number" value={productForm.stockMin} onChange={e => setProductForm({ ...productForm, stockMin: Number(e.target.value) })}/></label><label>Precio costo<input type="number" step=".01" value={productForm.precioCosto} onChange={e => setProductForm({ ...productForm, precioCosto: Number(e.target.value) })}/></label></div><label>Precio venta<input type="number" step=".01" value={productForm.precioVenta} onChange={e => setProductForm({ ...productForm, precioVenta: Number(e.target.value) })}/></label><button className="primary">Guardar material</button></form>}
+    {tab === "Ingresar stock" && <form className="panel material-form" onSubmit={saveIncome}><h3>Ingreso de materiales</h3><label>Buscar material<input required list="stock-materials" value={income.codigo} onChange={e => setIncome({ ...income, codigo: e.target.value })} placeholder="Escribe código o nombre…" autoComplete="off"/><datalist id="stock-materials">{activeProducts.map(p => <option key={p.codigo} value={p.codigo}>{p.nombre} · stock {p.stock}</option>)}</datalist><small>Escribe parte del código o nombre y selecciona una coincidencia.</small></label><div className="form-row"><label>Fecha<input type="date" required value={income.fecha} onChange={e => setIncome({ ...income, fecha: e.target.value })}/></label><label>Tipo<select value={income.tipo} onChange={e => setIncome({ ...income, tipo: e.target.value })}><option>INGRESO</option><option>AJUSTE_POSITIVO</option><option>AJUSTE_NEGATIVO</option></select></label></div><label>Cantidad<input type="number" min=".01" step=".01" required value={income.cantidad} onChange={e => setIncome({ ...income, cantidad: Number(e.target.value) })}/></label><label>Observaciones<textarea value={income.observaciones} onChange={e => setIncome({ ...income, observaciones: e.target.value })}/></label><button className="primary">Registrar ingreso</button></form>}
+    {tab === "Carga masiva" && <section className="panel bulk-zone"><h3>Carga masiva</h3><p>No necesitas un Excel nuevo. Descarga la plantilla, complétala y guárdala como CSV.</p><div><button onClick={downloadTemplate}>Descargar plantilla</button><label className="upload-button">Seleccionar CSV<input type="file" accept=".csv,.txt" onChange={e => upload(e.target.files?.[0])}/></label></div></section>}
+    {tab === "Editar" && <>{!selected ? <><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Busca y selecciona un material…"/></label></section>{table}</> : <form className="panel material-form" onSubmit={saveEdit}><h3>Editar {selected.codigo}</h3><label>Nombre<input value={selected.nombre} onChange={e => setSelected({ ...selected, nombre: e.target.value })}/></label><div className="form-row"><label>Unidad<input value={selected.unidad} onChange={e => setSelected({ ...selected, unidad: e.target.value })}/></label><label>Grupo<input value={selected.grupo} onChange={e => setSelected({ ...selected, grupo: e.target.value })}/></label></div><div className="form-row"><label>Stock mínimo<input type="number" value={selected.stockMin} onChange={e => setSelected({ ...selected, stockMin: Number(e.target.value) })}/></label><label>Precio costo<input type="number" step=".01" value={selected.precioCosto} onChange={e => setSelected({ ...selected, precioCosto: Number(e.target.value) })}/></label></div><label>Precio venta<input type="number" step=".01" value={selected.precioVenta} onChange={e => setSelected({ ...selected, precioVenta: Number(e.target.value) })}/></label><div><button type="button" onClick={() => setSelected(null)}>Cancelar</button><button className="primary">Guardar cambios</button></div></form>}</>}
+    {tab === "Historial" && <section className="panel data-panel"><div className="panel-title"><div><h3>Historial de movimientos</h3><p>Ingresos, salidas, ajustes y ventas</p></div><button onClick={loadHistory}>↻ Actualizar</button></div><div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Código</th><th>Material</th><th>Tipo</th><th>Cantidad</th><th>Cliente / observación</th></tr></thead><tbody>{history.map((h, i) => <tr key={i}><td>{h.fecha}</td><td>{h.codigo}</td><td>{h.producto}</td><td><span className="table-status">{h.tipo}</span></td><td>{h.cantidad}</td><td>{h.cliente || h.observaciones}</td></tr>)}</tbody></table></div></section>}
+  </div>;
+}
+function Finance({ call, notify }: {
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    notify: (s: string) => void;
+}) {
+    const [period, setPeriod] = useState(month());
+    const [view, setView] = useState("MENSUAL");
+    const [indicator, setIndicator] = useState("INGRESOS");
+    const [plan, setPlan] = useState<any>(null);
+    const [accounting, setAccounting] = useState<any>(null);
+    const [curve, setCurve] = useState<any>(null);
+    const [rendition, setRendition] = useState<any>(null);
+    const [goalOpen, setGoalOpen] = useState(false);
+    const [receptionOpen, setReceptionOpen] = useState(false);
+    const [goalForm, setGoalForm] = useState({ objetivo: 0, presupuesto: 0 });
+    const [reception, setReception] = useState({ efectivo: 0, yape: 0, otros: 0, observacion: "" });
+    const load = useCallback(async () => {
+        const cacheKey = `nexo_finance_${period}_${indicator}_${view}`;
+        const cached = cacheGet<any>(cacheKey, cacheGet<any>("nexo_finance_latest", null));
+        if (cached) {
+            setPlan(cached.plan);
+            setAccounting(cached.accounting);
+            setCurve(cached.curve);
+            if (cached.rendition)
+                setRendition(cached.rendition);
+        }
+        const cachedCollections = cacheGet<Order[]>("nexo_collections", []);
+        if (cachedCollections.length)
+            setRendition(collectionRendition(cachedCollections));
+        try {
+            const [pResult, aResult, cResult] = await Promise.allSettled([
+                call<any>("obtenerPlaneamientoMensual", [period]),
+                call<any>("obtenerContabilidadDiaria", [period]),
+                call<any>("obtenerCurvaS", [indicator, view, `${period}-01`, true]),
+            ]);
+            const p = pResult.status === "fulfilled" ? pResult.value : cached?.plan;
+            const a = aResult.status === "fulfilled" ? aResult.value : cached?.accounting;
+            const c = cResult.status === "fulfilled" ? cResult.value : cached?.curve;
+            setPlan(p);
+            setAccounting(a);
+            setCurve(c);
+            const snapshot = { plan: p, accounting: a, curve: c, rendition };
+            cacheSet(cacheKey, snapshot);
+            cacheSet("nexo_finance_latest", snapshot);
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se cargó finanzas");
+        }
+        try {
+            const r = await call<any>("obtenerRendicionDia", [today()]);
+            const declarado = r?.declarado || {};
+            const total = Number(declarado.efectivo || 0) + Number(declarado.yape || 0) + Number(declarado.otros || 0);
+            if (total > 0 || r?.validacion) {
+                setRendition(r);
+                cacheSet("nexo_finance_rendition", r);
+            }
+            else
+                throw new Error("Resumen de rendición vacío");
+        }
+        catch {
+            try {
+                const [cobranzaResult, gastosResult] = await Promise.allSettled([
+                    call<any>("obtenerCobranzaPedidos", [{ desde: `${today().slice(0, 4)}-01-01`, hasta: today(), texto: "" }]),
+                    call<any>("obtenerGastosOperacion", [today()]),
+                ]);
+                const raw = cobranzaResult.status === "fulfilled" ? cobranzaResult.value : [];
+                const cobranza = Array.isArray(raw) ? raw : raw?.pedidos || [];
+                const pendientes = cobranza.filter((row: any) => {
+                    const cobrado = ["efectivo", "yape", "plin", "transferencia", "pos", "otros"]
+                        .reduce((total, key) => total + Number(row?.[key] || 0), 0);
+                    return cobrado > 0;
+                });
+                const sum = (key: string) => pendientes.reduce((total: number, row: any) => total + Number(row?.[key] || 0), 0);
+                const efectivo = sum("efectivo");
+                const yape = sum("yape") + sum("plin");
+                const otros = sum("transferencia") + sum("pos") + sum("otros");
+                const rawGastos = gastosResult.status === "fulfilled" ? gastosResult.value : [];
+                const gastos = Array.isArray(rawGastos) ? rawGastos : rawGastos?.movimientos || rawGastos?.gastos || [];
+                const gastosEfectivo = gastos.reduce((total: number, row: any) => String(row?.canal || row?.medio || "").toUpperCase() === "EFECTIVO" ? total + Number(row?.monto || 0) : total, 0);
+                const gastosVirtuales = gastos.reduce((total: number, row: any) => String(row?.canal || row?.medio || "").toUpperCase() !== "EFECTIVO" ? total + Number(row?.monto || 0) : total, 0);
+                const nextRendition = {
+                    fecha: today(),
+                    fuente: "COBRANZA_PENDIENTE",
+                    pedidosPendientes: pendientes.length,
+                    declarado: {
+                        efectivo,
+                        yape,
+                        otros,
+                        gastosEfectivo,
+                        gastosVirtuales,
+                        efectivoEsperado: Math.max(0, efectivo - gastosEfectivo),
+                        pendiente: pendientes.reduce((total: number, row: any) => total + Number(row?.saldo || 0), 0),
+                    },
+                    validacion: null,
+                };
+                setRendition(nextRendition);
+                cacheSet("nexo_finance_rendition", nextRendition);
+            }
+            catch {
+                const previous = cacheGet<any>("nexo_finance_rendition", null);
+                if (previous)
+                    setRendition(previous);
+            }
+        }
+    }, [call, indicator, notify, period, view]);
+    useEffect(() => { load(); }, [load]);
+    function openGoals() {
+        const planRows = plan?.filas || [];
+        const objetivo = planRows.filter((row: any) => String(row.tipo || "").includes("INGRESO") || String(row.categoria || "").toUpperCase() === "VENTAS").reduce((sum: number, row: any) => sum + Number(row.monto || 0), 0);
+        const presupuesto = planRows.filter((row: any) => String(row.tipo || "").includes("GASTO")).reduce((sum: number, row: any) => sum + Number(row.monto || 0), 0);
+        setGoalForm({ objetivo, presupuesto });
+        setGoalOpen(true);
+    }
+    async function saveGoals(e: FormEvent) {
+        e.preventDefault();
+        const rows = [{ tipo: "OPERACIÓN INGRESO", categoria: "VENTAS", concepto: "Objetivo comercial", monto: Number(goalForm.objetivo), unidad: "DISTRIBUCIÓN" }, { tipo: "OPERACIÓN GASTO", categoria: "PRESUPUESTO", concepto: "Presupuesto de gastos", monto: Number(goalForm.presupuesto), unidad: "DISTRIBUCIÓN" }];
+        try {
+            notify(await call<string>("guardarPlaneamientoMensual", [{ periodo: period, filas: rows }]));
+            setGoalOpen(false);
+            await load();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se guardó el control comercial");
+        }
+    }
+    function openReception() {
+        const declared = rendition?.declarado || {};
+        const validation = rendition?.validacion || {};
+        setReception({ efectivo: Number(validation.efectivoRecibido ?? declared.efectivoEsperado ?? 0), yape: Number(validation.yapeVerificado ?? declared.yape ?? 0), otros: Number(validation.otrosVerificado ?? declared.otros ?? 0), observacion: validation.observacion || "" });
+        setReceptionOpen(true);
+    }
+    async function confirmReception(e: FormEvent) {
+        e.preventDefault();
+        try {
+            const message = await call<string>("validarRendicionDia", [{ fecha: today(), efectivoRecibido: reception.efectivo, yapeVerificado: reception.yape, otrosVerificado: reception.otros, observacion: reception.observacion }]);
+            notify(message);
+            setReceptionOpen(false);
+            await load();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se registró la recepción");
+        }
+    }
+    async function budget() {
+        const concept = prompt("Concepto presupuestado");
+        if (!concept)
+            return;
+        const amount = Number(prompt("Monto mensual", "0"));
+        const flow = prompt("Tipo: INGRESO o GASTO", "INGRESO")?.toUpperCase();
+        const row = { tipo: flow === "INGRESO" ? "OPERACIÓN INGRESO" : "OPERACIÓN GASTO", categoria: flow === "INGRESO" ? "VENTAS" : "OTROS", concepto: concept, monto: amount, unidad: "DISTRIBUCIÓN" };
+        try {
+            const rows = [...(plan?.filas || []), row];
+            notify(await call<string>("guardarPlaneamientoMensual", [{ periodo: period, filas: rows }]));
+            load();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se guardó");
+        }
+    }
+    async function actual() {
+        const concept = prompt("Concepto contable");
+        if (!concept)
+            return;
+        const amount = Number(prompt("Monto real", "0"));
+        const flow = prompt("Tipo: INGRESO o GASTO", "INGRESO")?.toUpperCase();
+        const day = Number(today().slice(8, 10));
+        const rows = [...(accounting?.filas || []), { tipo: flow === "INGRESO" ? "OPERACIÓN INGRESO" : "OPERACIÓN GASTO", categoria: flow === "INGRESO" ? "VENTAS" : "OTROS", concepto: concept, valores: { [day]: amount }, medios: { [day]: "EFECTIVO" } }];
+        try {
+            notify(await call<string>("guardarContabilidadDiaria", [{ periodo: period, filas: rows }]));
+            load();
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se guardó");
+        }
+    }
+    const rs = plan?.resumen || {};
+    const cs = curve?.resumen || {};
+    const rows = accounting?.filas || [];
+    const sumByType = (type: string) => rows.filter((row: any) => row.tipo === type).reduce((sum: number, row: any) => sum + Object.values(row.valores || {}).reduce((subtotal: number, value: any) => subtotal + Number(value || 0), 0), 0);
+    const realExpenses = sumByType("OPERACIÓN GASTO");
+    const realInvestment = sumByType("INVERSIÓN");
+    const actualRevenue = Number(cs.real || 0);
+    const targetRevenue = (plan?.filas || []).filter((row: any) => String(row.tipo || "").includes("INGRESO") || String(row.categoria || "").toUpperCase() === "VENTAS").reduce((sum: number, row: any) => sum + Number(row.monto || 0), 0) || Number(cs.planeado || rs.ingresos || 0);
+    const expenseBudget = (plan?.filas || []).filter((row: any) => String(row.tipo || "").includes("GASTO")).reduce((sum: number, row: any) => sum + Number(row.monto || 0), 0) || Number(rs.gastos || 0);
+    const result = actualRevenue - realExpenses - realInvestment;
+    const selectedDate = new Date(`${period}-01T12:00:00`);
+    const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
+    const current = new Date();
+    const isCurrentPeriod = current.getFullYear() === selectedDate.getFullYear() && current.getMonth() === selectedDate.getMonth();
+    const elapsedDays = isCurrentPeriod ? Math.max(1, current.getDate()) : daysInMonth;
+    const projection = view === "MENSUAL" ? actualRevenue / elapsedDays * daysInMonth : actualRevenue;
+    const remaining = Math.max(0, targetRevenue - actualRevenue);
+    const dailyNeed = remaining / Math.max(1, daysInMonth - elapsedDays);
+    const progress = targetRevenue ? actualRevenue / targetRevenue * 100 : 0;
+    const expenseProgress = expenseBudget ? realExpenses / expenseBudget * 100 : 0;
+    const labels = curve?.labels || [], plannedValues = curve?.planeado || [], actualValues = curve?.real || [];
+    const chartMax = Math.max(1, ...plannedValues, ...actualValues);
+    const chartPoints = (values: number[]) => values.map((value, index) => `${labels.length <= 1 ? 300 : 20 + index * (560 / (labels.length - 1))},${195 - Number(value || 0) / chartMax * 155}`).join(" ");
+    const status = !targetRevenue ? { tone: "warning", title: "Falta definir una meta comercial", text: "Registra el presupuesto de ventas para medir avance y proyección." } : progress >= 100 ? { tone: "good", title: "Meta comercial alcanzada", text: `Superaste la meta en ${money(actualRevenue - targetRevenue)}.` } : projection >= targetRevenue ? { tone: "good", title: "Ritmo suficiente para cumplir", text: `La proyección al cierre es ${money(projection)}.` } : { tone: "danger", title: "Riesgo de no alcanzar la meta", text: `Necesitas vender aproximadamente ${money(dailyNeed)} por día restante.` };
+    return <div className="finance-intelligence"><Heading eyebrow="INTELIGENCIA DE NEGOCIO" title="Centro de decisiones comerciales" text="Control puntual de presupuesto, objetivo, cobranza, gastos y resultado."><div><button onClick={openGoals}>✎ Presupuesto y objetivo</button><button className="primary" onClick={actual}>＋ Registrar gasto</button></div></Heading><section className="finance-controlbar"><label>Periodo<input type="month" value={period} onChange={e => setPeriod(e.target.value)}/></label><label>Vista<select value={view} onChange={e => setView(e.target.value)}><option value="SEMANAL">Semana · días</option><option value="MENSUAL">Mes · días</option><option value="ANUAL">Año · meses</option></select></label><label>Indicador<select value={indicator} onChange={e => setIndicator(e.target.value)}><option value="INGRESOS">Ventas e ingresos</option><option value="GASTOS">Gastos</option><option value="UTILIDAD">Resultado comercial</option><option value="FLUJO">Flujo de caja</option></select></label></section><section className="commercial-scorecards"><article><small>Venta / ingreso real</small><strong>{money(actualRevenue)}</strong><span>Acumulado del periodo</span></article><article><small>Objetivo comercial</small><strong>{money(targetRevenue)}</strong><div className="score-progress"><i style={{ width: `${Math.min(100, progress)}%` }}></i></div><span>{progress.toFixed(1)}% de avance</span></article><article><small>Gastos reales / presupuesto</small><strong>{money(realExpenses)}</strong><span>{expenseBudget ? `${expenseProgress.toFixed(1)}% de ${money(expenseBudget)}` : "Sin presupuesto de gastos"}</span></article><article className={result >= 0 ? "positive" : "negative"}><small>Resultado estimado</small><strong>{money(result)}</strong><span>Ingresos − gastos − inversión</span></article></section><section className={`business-alert ${status.tone}`}><span>{status.tone === "good" ? "✓" : status.tone === "danger" ? "!" : "i"}</span><div><strong>{status.title}</strong><p>{status.text}</p></div><aside><small>Proyección al cierre</small><b>{money(projection)}</b></aside></section><section className="daily-reception"><div><small>RECEPCIÓN FÍSICA DE HOY</small><h3>Cuadre de cobranza</h3><p>Importes esperados según el reporte de Cobranza y rendición.</p></div><article><span>Efectivo esperado</span><b>{money(rendition?.declarado?.efectivoEsperado)}</b><small>Cobrado {money(rendition?.declarado?.efectivo)} − gastos {money(rendition?.declarado?.gastosEfectivo)}</small></article><article><span>Yape / Plin verificado</span><b>{money(rendition?.declarado?.yape)}</b><small>Según cobros registrados hoy</small></article><article><span>Transferencias y otros</span><b>{money(rendition?.declarado?.otros)}</b><small>CCI, POS y otros medios</small></article><button onClick={openReception}>{rendition?.validacion ? "Revisar recepción" : "Confirmar recepción"}</button></section><section className="finance-bi-grid"><article className="panel commercial-trend"><div className="panel-title"><div><h3>Objetivo versus resultado real</h3><p>Azul: objetivo acumulado · Coral: avance real</p></div><span>{indicator.toLowerCase()}</span></div><div className="finance-line-chart"><div className="finance-gridlines">{[0, 1, 2, 3].map(value => <i key={value}></i>)}</div><svg viewBox="0 0 600 220" preserveAspectRatio="none"><polyline points={chartPoints(plannedValues)} fill="none" stroke="#2d7dd2" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/><polyline points={chartPoints(actualValues)} fill="none" stroke="#ff6b55" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/></svg><div className="finance-axis">{labels.map((label: string, index: number) => <span key={`${label}-${index}`}>{label}</span>)}</div></div><div className="finance-chart-legend"><span><i className="planned"></i>Objetivo {money(targetRevenue)}</span><span><i className="actual"></i>Real {money(actualRevenue)}</span></div></article><aside className="commercial-actions"><article className="panel"><h3>Decisiones sugeridas</h3><div><b>{money(remaining)}</b><span>Falta para alcanzar el objetivo</span></div><div><b>{money(dailyNeed)}</b><span>Venta diaria necesaria</span></div><div><b>{money(accounting?.cuentasPorCobrar || cs.cuentasPorCobrar || 0)}</b><span>Pendiente por cobrar</span></div></article><article className="panel"><h3>Lectura rápida</h3><p>{realExpenses > expenseBudget && expenseBudget ? "Los gastos superaron el presupuesto. Revisa las partidas con mayor desviación." : "Los gastos están controlados frente al presupuesto registrado."}</p><p>{projection < targetRevenue && targetRevenue ? "Prioriza clientes frecuentes y productos de mayor rotación para recuperar el ritmo." : "El ritmo comercial es favorable; protege el margen y acelera la cobranza."}</p></article></aside></section><section className="panel budget-breakdown"><div className="panel-title"><div><h3>Presupuesto y objetivo comercial</h3><p>Un único control mensual, sin gestionar múltiples hojas.</p></div><button onClick={openGoals}>✎ Editar control</button></div><div className="control-summary-row"><article><span>Objetivo de ventas</span><b>{money(targetRevenue)}</b></article><article><span>Presupuesto de gastos</span><b>{money(expenseBudget)}</b></article><article><span>Cuentas por cobrar</span><b>{money(accounting?.cuentasPorCobrar || 0)}</b></article></div></section>{goalOpen && <div className="modal-bg"><form className="modal finance-editor" onSubmit={saveGoals}><button type="button" className="close" onClick={() => setGoalOpen(false)}>×</button><span className="eyebrow">CONTROL COMERCIAL MENSUAL</span><h2>Presupuesto y objetivo</h2><p>Estos dos importes alimentan todas las comparaciones del periodo {period}.</p><label>Objetivo comercial de ventas<input type="number" min="0" step=".01" value={goalForm.objetivo || ""} onChange={e => setGoalForm({ ...goalForm, objetivo: Number(e.target.value) })} placeholder="Ej. 15000"/></label><label>Presupuesto máximo de gastos<input type="number" min="0" step=".01" value={goalForm.presupuesto || ""} onChange={e => setGoalForm({ ...goalForm, presupuesto: Number(e.target.value) })} placeholder="Ej. 3000"/></label><button className="primary">Guardar y actualizar indicadores</button></form></div>}{receptionOpen && <div className="modal-bg"><form className="modal finance-editor" onSubmit={confirmReception}><button type="button" className="close" onClick={() => setReceptionOpen(false)}>×</button><span className="eyebrow">RECEPCIÓN DE COBRANZA</span><h2>Confirmar importes recibidos</h2><p>Compara lo físico contra el reporte generado por Cobranza.</p><div className="reception-expected"><span>Esperado en efectivo <b>{money(rendition?.declarado?.efectivoEsperado)}</b></span><span>Esperado en Yape <b>{money(rendition?.declarado?.yape)}</b></span><span>Otros medios <b>{money(rendition?.declarado?.otros)}</b></span></div><label>Efectivo recibido físicamente<input type="number" min="0" step=".01" value={reception.efectivo || ""} onChange={e => setReception({ ...reception, efectivo: Number(e.target.value) })}/></label><label>Yape / Plin verificado<input type="number" min="0" step=".01" value={reception.yape || ""} onChange={e => setReception({ ...reception, yape: Number(e.target.value) })}/></label><label>Transferencias y otros verificados<input type="number" min="0" step=".01" value={reception.otros || ""} onChange={e => setReception({ ...reception, otros: Number(e.target.value) })}/></label><label>Observación<textarea value={reception.observacion} onChange={e => setReception({ ...reception, observacion: e.target.value })}/></label><button className="primary">Validar recepción y registrar movimiento</button></form></div>}</div>;
+}
+function Reports({ call, notify }: {
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    notify: (s: string) => void;
+}) {
+    const [from, setFrom] = useState(`${month()}-01`);
+    const [to, setTo] = useState(today());
+    const [query, setQuery] = useState("");
+    const [rows, setRows] = useState<Order[]>([]);
+    const load = useCallback(async () => {
+        try {
+            setRows(await call<Order[]>("obtenerEmisiones", [{ fechaDesde: from, fechaHasta: to, texto: query }]));
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se cargó");
+        }
+    }, [call, from, notify, query, to]);
+    useEffect(() => { load(); }, [load]);
+    function csv() { const lines = [["Pedido", "Fecha", "Cliente", "Total"], ...rows.map(x => [x.ventaId, x.fecha, x.cliente, x.total])].map(x => x.join(";")).join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([lines], { type: "text/csv" })); a.download = `reporte-${from}-${to}.csv`; a.click(); }
+    return <div><Heading eyebrow="INFORMACIÓN HISTÓRICA" title="Reportes" text="Cruza ventas por fechas, cliente, pedido o producto."><button className="primary" onClick={csv}>Exportar CSV</button></Heading><section className="section-tools"><input type="date" value={from} onChange={e => setFrom(e.target.value)}/><input type="date" value={to} onChange={e => setTo(e.target.value)}/><label className="search"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cliente, producto o pedido…"/></label><button onClick={load}>Filtrar</button></section><section className="panel data-panel"><SimpleOrders rows={rows}/></section></div>;
+}
+function ProductCurvePicker({ index, color, value, options, onChange }: {
+    index: number;
+    color: string;
+    value: string;
+    options: Array<{ codigo: string; nombre: string }>;
+    onChange: (code: string) => void;
+}) {
+    const selectedProduct = options.find(product => product.codigo === value);
+    const [query, setQuery] = useState("");
+    const [open, setOpen] = useState(false);
+    useEffect(() => {
+        setQuery(selectedProduct ? `${selectedProduct.codigo} · ${selectedProduct.nombre}` : "");
+    }, [selectedProduct?.codigo, selectedProduct?.nombre]);
+    const normalized = query.toLowerCase().trim();
+    const matches = options.filter(product => !normalized || `${product.codigo} ${product.nombre}`.toLowerCase().includes(normalized)).slice(0, 12);
+    return <label className="curve-search-picker"><i style={{ background: color }}></i><input value={query} placeholder={`Buscar producto ${index + 1}…`} onFocus={() => { setQuery(""); setOpen(true); }} onChange={event => { setQuery(event.target.value); setOpen(true); }} onBlur={() => window.setTimeout(() => setOpen(false), 160)} autoComplete="off"/>{value && <button type="button" aria-label={`Quitar producto ${index + 1}`} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(""); setQuery(""); }}>×</button>}{open && <div className="curve-search-results">{matches.map(product => <button type="button" key={product.codigo} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(product.codigo); setQuery(`${product.codigo} · ${product.nombre}`); setOpen(false); }}><b>{product.codigo}</b><span>{product.nombre}</span></button>)}{!matches.length && <small>No se encontraron productos</small>}</div>}</label>;
+}
+function Analytics({ call, notify }: {
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    notify: (s: string) => void;
+}) {
+    const [products, setProducts] = useState<any[]>([]);
+    const [clients, setClients] = useState<any[]>([]);
+    const [dashboard, setDashboard] = useState<any>(null);
+    const [catalog, setCatalog] = useState<Product[]>([]);
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [year, setYear] = useState(new Date().getFullYear());
+    const [selected, setSelected] = useState<string[]>([]);
+    const colors = ["#ff6b55", "#2d7dd2", "#23ad78", "#f0a23b", "#8357d9", "#e04f8a", "#5f6b7a", "#16a3a3", "#b5bbc5"];
+    const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    const buildLocalDashboard = useCallback((catalog: Product[], orders: Order[], requested: string[]) => {
+        const groups = ["General", "Limpieza", "Ferretería", "Útiles", "Bisutería", "Piñatería", "Cuchillos", "Plásticos", "Otros"];
+        const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+        const counts: Record<string, number> = Object.fromEntries(groups.map(group => [group, 0]));
+        const options = (catalog || []).filter(product => product.codigo && product.nombre).map(product => {
+            const group = groups.find(value => normalize(value) === normalize(product.grupo || "")) || "Otros";
+            counts[group] += 1;
+            return { codigo: product.codigo, nombre: product.nombre, grupo: group };
+        }).sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+        const monthly: Record<string, number[]> = {};
+        const names: Record<string, string> = {};
+        options.forEach(product => {
+            monthly[product.codigo] = Array(12).fill(0);
+            names[product.codigo] = product.nombre;
+        });
+        (orders || []).forEach(order => {
+            const match = String(order.fecha || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+            if (!match || Number(match[3]) !== year)
+                return;
+            const month = Number(match[2]) - 1;
+            (order.items || []).forEach(item => {
+                if (!monthly[item.codigo])
+                    monthly[item.codigo] = Array(12).fill(0);
+                names[item.codigo] = item.nombre || names[item.codigo] || item.codigo;
+                monthly[item.codigo][month] += Number(item.subtotal || (Number(item.cantidad) * Number(item.precioUnitario)) || 0);
+            });
+        });
+        const ranked = Object.keys(monthly).sort((a, b) => monthly[b].reduce((sum, value) => sum + value, 0) - monthly[a].reduce((sum, value) => sum + value, 0));
+        const selection = (requested.some(Boolean) ? requested : ranked.slice(0, 3)).slice(0, 3);
+        const series = selection.map((code, slot) => code && monthly[code] ? ({
+            codigo: code,
+            nombre: names[code] || code,
+            slot,
+            meses: monthly[code].map(value => Math.round(value * 100) / 100),
+            total: Math.round(monthly[code].reduce((sum, value) => sum + value, 0) * 100) / 100
+        }) : null).filter(Boolean);
+        return {
+            meses: monthNames,
+            opciones: options,
+            seleccion: selection,
+            series,
+            distribucion: groups.map(nombre => ({ nombre, cantidad: counts[nombre] })).filter(group => group.cantidad > 0),
+            totalProductos: options.length,
+            totalVentas: Math.round((orders || []).reduce((sum, order) => sum + Number(order.total || 0), 0) * 100) / 100
+        };
+    }, [year]);
+    const load = useCallback(async () => {
+        try {
+            const [p, c, currentCatalog, currentOrders] = await Promise.all([
+                call<any>("obtenerAnalisis", ["PRODUCTOS", {}]),
+                call<any>("obtenerAnalisis", ["CLIENTES", {}]),
+                call<Product[]>("obtenerCatalogoProductos"),
+                call<Order[]>("obtenerEmisiones", [{ fechaDesde: `${year}-01-01`, fechaHasta: `${year}-12-31`, texto: "" }])
+            ]);
+            setProducts(Array.isArray(p) ? p : p?.productos || p?.topProductos || []);
+            setClients(Array.isArray(c) ? c : c?.clientes || c?.topClientes || []);
+            setCatalog(currentCatalog || []);
+            setOrders(currentOrders || []);
+            const d = buildLocalDashboard(currentCatalog || [], currentOrders || [], []);
+            setDashboard(d);
+            setSelected(d.seleccion || []);
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se cargó análisis");
+        }
+    }, [buildLocalDashboard, call, notify, year]);
+    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        if (catalog.length)
+            setDashboard(buildLocalDashboard(catalog, orders, selected));
+    }, [buildLocalDashboard, catalog, orders, selected]);
+    const card = (title: string, rows: any[]) => <article className="panel"><h3>{title}</h3>{rows.slice(0, 10).map((x, i) => <div className="ranking" key={i}><b>{i + 1}</b><span>{x.nombre || x.cliente || x.producto || x.codigo || "Registro"}</span><strong>{money(x.total || x.ventas || x.importe)}</strong></div>)}{!rows.length && <p>No hay ventas suficientes para este análisis.</p>}</article>;
+    const distribution = dashboard?.distribucion || [];
+    const totalGroups = distribution.reduce((sum: number, x: any) => sum + Number(x.cantidad || 0), 0);
+    let angle = 0;
+    const gradient = distribution.map((x: any, i: number) => { const start = angle; angle += totalGroups ? Number(x.cantidad || 0) / totalGroups * 360 : 0; return colors[i] + " " + start + "deg " + angle + "deg"; }).join(",");
+    const series = dashboard?.series || [];
+    const maxValue = Math.max(1, ...series.flatMap((s: any) => s.meses || []));
+    const coordinates = (values: number[]) => values.map((value, index) => ({ x: 25 + index * 50, y: 195 - Number(value || 0) / maxValue * 160, value: Number(value || 0) }));
+    const curvePath = (values: number[]) => {
+        const dots = coordinates(values);
+        if (!dots.length)
+            return "";
+        return dots.slice(1).reduce((path, point, index) => {
+            const previous = dots[index];
+            const distance = (point.x - previous.x) / 2;
+            return `${path} C ${previous.x + distance},${previous.y} ${point.x - distance},${point.y} ${point.x},${point.y}`;
+        }, `M ${dots[0].x},${dots[0].y}`);
+    };
+    const leader = distribution.slice().sort((a: any, b: any) => b.cantidad - a.cantidad)[0];
+    function changeProduct(index: number, code: string) {
+        const next = [...selected.slice(0, 3)];
+        while (next.length < 3)
+            next.push("");
+        if (code)
+            next.forEach((value, position) => { if (position !== index && value === code)
+                next[position] = ""; });
+        next[index] = code;
+        setSelected(next);
+    }
+    return <div><Heading eyebrow="INTELIGENCIA COMERCIAL" title="Análisis de ventas" text="Compara productos por mes y revisa la composición de tu inventario."><div className="analysis-heading-actions"><select value={year} onChange={e => setYear(Number(e.target.value))}>{[0, 1, 2, 3].map(n => <option key={n} value={new Date().getFullYear() - n}>{new Date().getFullYear() - n}</option>)}</select><button onClick={load}>↻ Actualizar</button></div></Heading><section className="analysis-metrics"><article><small>Ventas del año</small><strong>{money(dashboard?.totalVentas)}</strong></article><article><small>Productos registrados</small><strong>{dashboard?.totalProductos || 0}</strong></article><article><small>Grupo principal</small><strong>{leader?.nombre || "—"}</strong><span>{leader?.cantidad || 0} productos</span></article><article><small>Curvas comparadas</small><strong>{series.length} / 3</strong></article></section><section className="analysis-main-grid"><article className="panel trend-panel"><div className="chart-title"><div><h3>Ventas por mes</h3><p>Importe mensual por producto · {year}</p></div></div><div className="product-curve-selectors">{[0, 1, 2].map(i => <ProductCurvePicker key={i} index={i} color={colors[i]} value={selected[i] || ""} options={dashboard?.opciones || []} onChange={code => changeProduct(i, code)}/>)}</div><div className="line-chart"><div className="chart-gridlines">{[0, 1, 2, 3].map(x => <i key={x}></i>)}</div><svg viewBox="0 0 600 220" preserveAspectRatio="none" aria-label="Ventas mensuales comparadas">{series.map((s: any, i: number) => <g key={s.codigo}><path d={curvePath(s.meses)} fill="none" stroke={colors[s.slot ?? i]} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{coordinates(s.meses).filter(point => point.value > 0).map((point, pointIndex) => <circle key={pointIndex} cx={point.x} cy={point.y} r="5" fill="#fff" stroke={colors[s.slot ?? i]} strokeWidth="3"/>)}</g>)}</svg><div className="month-axis">{(dashboard?.meses?.length ? dashboard.meses : monthNames).map((m: string) => <span key={m}>{m}</span>)}</div></div><div className="curve-legend">{series.map((s: any, i: number) => <div key={s.codigo}><i style={{ background: colors[s.slot ?? i] }}></i><span>{s.nombre}</span><b>{money(s.total)}</b></div>)}</div></article><article className="panel donut-panel"><div className="chart-title"><div><h3>Productos por grupo</h3><p>Distribución del catálogo actual</p></div></div><div className="donut-wrap"><div className="donut-chart" style={{ background: "conic-gradient(" + (gradient || "#eef0f4 0deg 360deg") + ")" }}><span><b>{totalGroups}</b><small>productos</small></span></div><div className="donut-legend">{distribution.map((g: any, i: number) => <div key={g.nombre}><i style={{ background: colors[i] }}></i><span>{g.nombre}</span><b>{g.cantidad}</b><small>{totalGroups ? (g.cantidad / totalGroups * 100).toFixed(1) : "0.0"}%</small></div>)}</div></div></article></section><section className="analytics-grid ranking-grid">{card("Top 10 · productos más vendidos", products)}{card("Top 10 · clientes que más compran", clients)}</section></div>;
+}
+function Settings({ call, notify, session }: {
+    call: <T>(f: string, a?: unknown[]) => Promise<T>;
+    notify: (s: string) => void;
+    session: Session;
+}) {
+    const [users, setUsers] = useState<any[]>([]);
+    const [savingUser, setSavingUser] = useState("");
+    const [dirty, setDirty] = useState<string[]>([]);
+    const [query, setQuery] = useState("");
+    const [profileFilter, setProfileFilter] = useState("TODOS");
+    const [editing, setEditing] = useState<any | null>(null);
+    const load = useCallback(() => {
+        if (session.perfil === "MASTER")
+            call<any[]>("obtenerUsuarios").then(rows => { setUsers((rows || []).map(u => ({ ...u, permisos: Array.isArray(u.permisos) && u.permisos.length ? u.permisos : defaultPermissions(u.perfil) }))); setDirty([]); }).catch(() => undefined);
+    }, [call, session.perfil]);
+    useEffect(() => { load(); }, [load]);
+    async function action(fn: string) {
+        if (!confirm("¿Confirmas esta operación administrativa?"))
+            return;
+        try {
+            notify(await call<string>(fn));
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se ejecutó");
+        }
+    }
+    function markDirty(usuario: string) { setDirty(current => current.includes(usuario) ? current : [...current, usuario]); }
+    function createUser() { setEditing({ usuario: "", nombre: "", password: "", perfil: "PREVENTA", estado: "ACTIVO", comentarios: "", permisos: defaultPermissions("PREVENTA"), nuevo: true }); }
+    function toggle(u: any) { const next = { ...u, estado: u.estado === "ACTIVO" ? "BLOQUEADO" : "ACTIVO" }; setUsers(current => current.map(row => row.usuario === u.usuario ? next : row)); markDirty(u.usuario); }
+    function setPermission(u: any, permission: string, enabled: boolean) {
+        const permisos = enabled ? Array.from(new Set([...(u.permisos || []), permission])) : (u.permisos || []).filter((x: string) => x !== permission);
+        const next = { ...u, permisos };
+        setUsers(current => current.map(row => row.usuario === u.usuario ? next : row));
+        markDirty(u.usuario);
+    }
+    function applyTemplate(u: any, profile: string) { const next = { ...u, perfil: profile, permisos: defaultPermissions(profile) }; setUsers(current => current.map(row => row.usuario === u.usuario ? next : row)); markDirty(u.usuario); }
+    async function saveUser(u: any) {
+        if (u.perfil === "MASTER" && (!u.permisos.includes("configuracion") || u.estado !== "ACTIVO") && u.usuario === session.usuario) {
+            notify("Por seguridad no puedes bloquearte ni quitarte Configuración.");
+            return;
+        }
+        setSavingUser(u.usuario);
+        try {
+            const message = await call<string>("actualizarUsuario", [{ ...u, originalUsuario: u.usuario }]);
+            notify(message);
+            setDirty(current => current.filter(x => x !== u.usuario));
+        }
+        catch (x) {
+            notify(x instanceof Error ? x.message : "No se guardaron los cambios");
+        }
+        finally {
+            setSavingUser("");
+        }
+    }
+    async function saveEditor(e: FormEvent) { e.preventDefault(); if (!editing)
+        return; setSavingUser(editing.usuario || "nuevo"); try {
+        const fn = editing.nuevo ? "crearUsuarioSistema" : "actualizarUsuario";
+        const payload = { ...editing, originalUsuario: editing.originalUsuario || editing.usuario };
+        notify(await call<string>(fn, [payload]));
+        setEditing(null);
+        await load();
+    }
+    catch (x) {
+        notify(x instanceof Error ? x.message : "No se guardó el usuario");
+    }
+    finally {
+        setSavingUser("");
+    } }
+    async function deleteEditor() { if (!editing || editing.nuevo || !confirm("¿Eliminar definitivamente este usuario?"))
+        return; try {
+        notify(await call<string>("eliminarUsuarioSistema", [editing.usuario]));
+        setEditing(null);
+        await load();
+    }
+    catch (x) {
+        notify(x instanceof Error ? x.message : "No se eliminó");
+    } }
+    const iconFor = (label: string) => icons[label === "Pedidos" ? "Pedidos y emisión" : label === "Cobranza" ? "Cobranza y rendición" : label === "Inventario" ? "Productos e inventario" : label === "Finanzas" ? "Gestión financiera" : label];
+    const filteredUsers = users.filter(u => (profileFilter === "TODOS" || u.perfil === profileFilter) && (String(u.nombre).toLowerCase().includes(query.toLowerCase()) || String(u.usuario).toLowerCase().includes(query.toLowerCase())));
+    return <div><Heading eyebrow="ADMINISTRACIÓN" title="Configuración" text="Controla usuarios, acceso por módulos, conexión y mantenimiento."><button className="primary" onClick={createUser}>＋ Crear usuario</button></Heading><section className="panel access-control"><div className="access-title"><div><h3>Usuarios y permisos de visibilidad</h3><p>Ordena el acceso, prepara cambios y guárdalos una sola vez por usuario.</p></div><span>{filteredUsers.length} usuario(s)</span></div><div className="user-filterbar"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar usuario o nombre…"/><select value={profileFilter} onChange={e => setProfileFilter(e.target.value)}><option value="TODOS">Todos los perfiles</option><option value="MASTER">Administradores</option><option value="PREVENTA">Preventistas</option><option value="COMPRADOR">Compradores</option></select></div><div className="user-access-list">{filteredUsers.map(u => <article className={"user-access-card " + (dirty.includes(u.usuario) ? "has-changes" : "")} key={u.usuario}><div className="user-access-head"><button className="user-identity edit-user" onClick={() => setEditing({ ...u, originalUsuario: u.usuario, password: "", nuevo: false })}><span>{String(u.nombre || u.usuario).slice(0, 2).toUpperCase()}</span><div><strong>{u.nombre}</strong><small>@{u.usuario} · {u.perfil} · Editar</small></div></button><div className="user-card-actions"><label className="master-switch"><input type="checkbox" checked={u.estado === "ACTIVO"} onChange={() => toggle(u)} disabled={savingUser === u.usuario}/><i></i><b>{u.estado === "ACTIVO" ? "Activo" : "Bloqueado"}</b></label>{dirty.includes(u.usuario) && <button className="save-permissions" onClick={() => saveUser(u)} disabled={savingUser === u.usuario}>{savingUser === u.usuario ? "Guardando…" : "Guardar cambios"}</button>}</div></div><div className="profile-templates"><small>Plantilla rápida:</small>{["PREVENTA", "COMPRADOR", "MASTER"].map(profile => <button key={profile} className={u.perfil === profile ? "active" : ""} onClick={() => applyTemplate(u, profile)}>{profile === "PREVENTA" ? "Preventista" : profile === "COMPRADOR" ? "Comprador" : "Administrador"}</button>)}<button onClick={() => { setUsers(current => current.map(row => row.usuario === u.usuario ? { ...row, permisos: modulePermissions.map(x => x.key) } : row)); markDirty(u.usuario); }}>Activar todo</button></div><div className={"permission-grid " + (u.estado !== "ACTIVO" ? "disabled" : "")}>{modulePermissions.map(module => { const enabled = (u.permisos || []).includes(module.key); return <label className="permission-switch" key={module.key}><span><i>{iconFor(module.label)}</i>{module.label}</span><input type="checkbox" checked={enabled} onChange={e => setPermission(u, module.key, e.target.checked)} disabled={u.estado !== "ACTIVO" || savingUser === u.usuario}/><b aria-hidden="true"></b></label>; })}</div>{dirty.includes(u.usuario) && savingUser !== u.usuario && <small className="draft-note">● Cambios sin guardar</small>}</article>)}</div></section><details className="panel maintenance-fold"><summary>Conexión y mantenimiento avanzado</summary><div className="config-grid config-secondary"><section className="connector"><h3>Google Sheets</h3><p><b>Conectado.</b> Los permisos y la auditoría se almacenan en Sheets.</p><span className="queue-chip">● API activa</span></section><section className="maintenance"><h3>Acciones delicadas</h3><button onClick={() => action("validarIntegridad")}>Verificar integridad</button><button onClick={() => action("repararFechasMovimientosVenta")}>Reparar fechas de ventas</button><button onClick={() => action("inicializarHojas")}>Inicializar hojas faltantes</button></section></div></details>{editing && <div className="modal-bg"><form className="modal user-editor" onSubmit={saveEditor}><button type="button" className="close" onClick={() => setEditing(null)}>×</button><span className="eyebrow">{editing.nuevo ? "NUEVO USUARIO" : "EDITAR USUARIO"}</span><h2>{editing.nuevo ? "Crear acceso" : editing.nombre}</h2><div className="form-row"><label>Usuario<input value={editing.usuario} onChange={e => setEditing({ ...editing, usuario: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, "") })} required/></label><label>Nombre completo<input value={editing.nombre} onChange={e => setEditing({ ...editing, nombre: e.target.value })} required/></label></div><div className="form-row"><label>Perfil<select value={editing.perfil} onChange={e => setEditing({ ...editing, perfil: e.target.value, permisos: defaultPermissions(e.target.value) })}><option value="PREVENTA">Preventista</option><option value="COMPRADOR">Comprador</option><option value="MASTER">Administrador</option></select></label><label>{editing.nuevo ? "Contraseña inicial" : "Nueva contraseña (opcional)"}<input type="password" value={editing.password || ""} onChange={e => setEditing({ ...editing, password: e.target.value })} required={editing.nuevo}/></label></div><label>Comentarios<textarea value={editing.comentarios || ""} onChange={e => setEditing({ ...editing, comentarios: e.target.value })}/></label><button className="primary" disabled={Boolean(savingUser)}>{savingUser ? "Guardando…" : editing.nuevo ? "Crear usuario" : "Guardar usuario"}</button>{!editing.nuevo && <button type="button" className="danger-link" onClick={deleteEditor}>Eliminar usuario</button>}</form></div>}</div>;
+}
