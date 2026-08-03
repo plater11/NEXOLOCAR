@@ -269,6 +269,7 @@ function dispatch(fn,args,token){
   if(!u || u.estado!=='ACTIVO') throw new Error('Usuario inactivo o sin permiso.');
   CURRENT_USER={usuario:u.usuario,nombre:u.nombre,perfil:u.perfil};
   const permitidas={obtenerListas:1,obtenerResumen:1,registrarProducto:1,actualizarProducto:1,eliminarProducto:1,registrarMovimiento:1,registrarMovimientosMasivos:1,obtenerMovimientosIngreso:1,actualizarMovimientoIngreso:1,eliminarMovimientoIngreso:1,registrarVenta:1,buscarProductosVenta:1,obtenerStock:1,buscarProducto:1,obtenerHistorial:1,obtenerEmisiones:1,generarCodigoImpresion:1,actualizarEstadoOperativoPedido:1,obtenerAnalisis:1,obtenerDashboardAnalisis:1,registrarCliente:1,limpiarClientesDuplicados:1,obtenerClientes:1,obtenerClientesPreventa:1,obtenerAlertasCumpleanos:1,obtenerUsuarios:1,crearUsuarioSistema:1,actualizarUsuario:1,eliminarUsuarioSistema:1,actualizarCliente:1,eliminarCliente:1,validarIntegridad:1,inicializarHojas:1,repararFechasMovimientosVenta:1,obtenerCatalogoProductos:1,obtenerUltimosProductos:1,obtenerProductosConIngresoReciente:1,buscarProductosIngreso:1,diagnosticoFuenteDatos:1,obtenerCentroGerencial:1,registrarMovimientoFinanciero:1,registrarActivoFinanciero:1,registrarPasivoFinanciero:1,guardarConfigFinanciera:1,obtenerPlaneamientoFinanciero:1,guardarPlaneamientoFinanciero:1,duplicarPlaneamientoMesAnterior:1,guardarObjetivoEstrategico:1,obtenerAnalisisVentasTemporal:1,obtenerPlaneamientoMensual:1,guardarPlaneamientoMensual:1,duplicarPlaneamientoMensualAnterior:1,obtenerContabilidadDiaria:1,guardarContabilidadDiaria:1,cerrarDiaContable:1,reabrirDiaContable:1,obtenerCurvaS:1,obtenerCobranzaPedidos:1,guardarCobranzaPedido:1,registrarGastoOperacion:1,obtenerGastosOperacion:1,obtenerRendicionDia:1,validarRendicionDia:1,subirComprobanteGasto:1,registrarCalificacionCliente:1,validarCargaMasivaInventario:1,importarCargaMasivaInventario:1};
+  permitidas.corregirPedido=1;
   if(!permitidas[fn] || typeof globalThis[fn] !== 'function') throw new Error('Función no permitida: '+fn);
   return globalThis[fn].apply(globalThis,args||[]);
 }
@@ -900,6 +901,35 @@ function registrarVenta(venta){
   }finally{
     try{lock.releaseLock();}catch(err){}
   }
+}
+
+function corregirPedido(pedido){
+  requerirPerfil(['MASTER','PREVENTA']);
+  const lock=LockService.getScriptLock();
+  try{
+    lock.waitLock(10000); asegurarHojas(); pedido=pedido||{};
+    const ventaId=String(pedido.ventaId||'').trim(), cliente=String(pedido.cliente||'').trim(), nuevos=Array.isArray(pedido.items)?pedido.items:[];
+    if(!ventaId||!cliente||!nuevos.length)return {ok:false,mensaje:'Pedido, cliente y materiales son obligatorios.'};
+    const ventas=ss().getSheetByName(HOJA_VENTAS), vd=ventas.getDataRange().getValues(); let fila=0, anterior=[];
+    for(let i=1;i<vd.length;i++)if(String(vd[i][0])===ventaId){fila=i+1;try{anterior=JSON.parse(vd[i][4]||'[]');}catch(e){anterior=[];}break;}
+    if(!fila)return {ok:false,mensaje:'Pedido no encontrado.'};
+    const cobros=typeof cobranzaMap_==='function'?cobranzaMap_():{}, cobrado=Number((cobros[ventaId]||{}).totalCobrado)||0;
+    const productos=obtenerProductoMap(), stock=obtenerStockMap_();
+    anterior.forEach(it=>{const c=normalizarCodigo(it.codigo);stock[c]=(Number(stock[c])||0)+(Number(it.cantidad)||0);});
+    let total=0;
+    const normalizados=nuevos.map(it=>{const c=normalizarCodigo(it.codigo),cantidad=Number(it.cantidad)||0;if(!productos[c])throw new Error('Producto no existe: '+c);if(cantidad<=0)throw new Error('Cantidad inválida: '+c);if((Number(stock[c])||0)<cantidad)throw new Error('Stock insuficiente para '+productos[c].nombre+'. Disponible: '+(Number(stock[c])||0));const precio=num(productos[c].precioVenta);stock[c]-=cantidad;total+=cantidad*precio;return {codigo:c,nombre:productos[c].nombre,cantidad,precioVenta:precio,precioNormal:precio,promocionAplicada:'NO',cantidadPromo:0,descripcionPromo:'',descuentoTotal:0,stockNuevo:Math.max(0,stock[c])};});
+    total=Math.round(total*100)/100;
+    if(cobrado>total+.01)return {ok:false,mensaje:'El nuevo total no puede ser menor que lo ya cobrado ('+cobrado.toFixed(2)+').'};
+    ventas.getRange(fila,3).setValue(cliente); ventas.getRange(fila,4).setValue(total); ventas.getRange(fila,5).setValue(JSON.stringify(normalizados)); ventas.getRange(fila,8).setValue(String(pedido.observaciones||''));
+    const mov=ss().getSheetByName(HOJA_MOVIMIENTOS), md=mov.getDataRange().getValues();
+    for(let i=md.length-1;i>=1;i--)if(String(md[i][8])===ventaId)mov.deleteRow(i+1);
+    const ahora=new Date(), usuario=usuarioSistema_(), obs=String(pedido.observaciones||('Pedido corregido '+ventaId));
+    const filas=normalizados.map(it=>[it.codigo,ahora,'SALIDA',it.cantidad,usuario,ahora,obs,it.stockNuevo,ventaId,cliente]);
+    if(filas.length)mov.getRange(mov.getLastRow()+1,1,filas.length,10).setValues(filas);
+    if(cobros[ventaId]){const c=cobros[ventaId],saldo=Math.max(0,total-cobrado),csh=ss().getSheetByName(HOJA_COBRANZA);csh.getRange(c.fila,4).setValue(cliente);csh.getRange(c.fila,5).setValue(total);csh.getRange(c.fila,15).setValue(saldo);actualizarCxC_({ventaId,cliente,totalPedido:total,totalCobrado:cobrado,fechaEntrega:c.fecha,fechaPromesa:c.fechaPromesa,medioPrometido:c.medioPrometido,estadoCobro:c.estadoCobro,observacion:c.observacion});}
+    SpreadsheetApp.flush(); return {ok:true,mensaje:'Pedido actualizado correctamente.',total};
+  }catch(e){return {ok:false,mensaje:'No se pudo editar el pedido: '+e.message};}
+  finally{try{lock.releaseLock();}catch(err){}}
 }
 
 function calcularStock(codigo){return obtenerStockMap_()[normalizarCodigo(codigo)]||0;}

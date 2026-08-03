@@ -83,6 +83,16 @@ type Summary = {
     totalClientes: number;
     valorTotalInventario: number;
 };
+type ApiRecord = { [key: string]: never };
+type UserRecord = { usuario: string; originalUsuario?: string; nombre: string; password?: string; perfil: string; estado: string; comentarios: string; permisos: string[]; nuevo?: boolean };
+type FinanceRow = { tipo: string; categoria: string; concepto?: string; monto?: number; valores?: Record<string, number>; medios?: Record<string, string> };
+type PlanData = { filas: FinanceRow[]; resumen?: { ingresos?: number; gastos?: number } };
+type AccountingData = { filas: FinanceRow[]; cuentasPorCobrar?: number };
+type CurveData = { labels?: string[]; planeado?: number[]; real?: number[]; resumen?: { planeado?: number; real?: number; ingresos?: number; gastos?: number; cuentasPorCobrar?: number }; canales?: { cuentasPorCobrar?: number } };
+type RenditionData = { fecha: string; fuente?: string; pedidosPendientes?: number; declarado: { efectivo?: number; yape?: number; otros?: number; gastosEfectivo?: number; gastosVirtuales?: number; efectivoEsperado?: number; pendiente?: number }; validacion: null | { efectivoRecibido?: number; yapeVerificado?: number; otrosVerificado?: number; observacion?: string } };
+type AnalysisSeries = { codigo: string; nombre: string; slot: number; meses: number[]; total: number };
+type AnalysisGroup = { nombre: string; cantidad: number };
+type AnalysisDashboard = { meses: string[]; opciones: Array<{ codigo: string; nombre: string }>; seleccion: string[]; series: AnalysisSeries[]; distribucion: AnalysisGroup[]; totalProductos: number; totalVentas: number };
 const menu = ["Inicio", "Clientes", "Preventa", "Pedidos y emisión", "Cobranza y rendición", "Productos e inventario", "Gestión financiera", "Reportes", "Análisis", "Configuración"];
 const icons: Record<string, string> = { Inicio: "⌂", Clientes: "♙", Preventa: "▣", "Pedidos y emisión": "▤", "Cobranza y rendición": "◉", "Productos e inventario": "□", "Gestión financiera": "↗", Reportes: "▥", Análisis: "⌁", Configuración: "⚙" };
 const modulePermissions = [
@@ -348,8 +358,10 @@ export default function Home() {
     }, [call, notify, session]);
     useEffect(() => {
         const saved = cacheGet<Session | null>("nexoventa_session", null);
-        if (!saved?.token)
-            return setChecking(false);
+        if (!saved?.token) {
+            queueMicrotask(() => setChecking(false));
+            return;
+        }
         api<Session & {
             ok: boolean;
         }>("obtenerSesion", [saved.token]).then(r => {
@@ -360,7 +372,7 @@ export default function Home() {
     }, []);
     useEffect(() => {
         const state = () => setOnline(navigator.onLine);
-        state();
+        queueMicrotask(state);
         window.addEventListener("online", state);
         window.addEventListener("offline", state);
         if ("serviceWorker" in navigator)
@@ -386,30 +398,29 @@ export default function Home() {
     useEffect(() => {
         if (!session)
             return;
-        setProducts(cacheGet("nexo_products", []));
-        setClients(cacheGet("nexo_clients", []));
-        setOrders(cacheGet("nexo_orders", []));
-        setCollectionRows(cacheGet("nexo_collections", []));
-        setSummary(cacheGet("nexo_summary", null));
+        queueMicrotask(() => {
+            setProducts(cacheGet("nexo_products", [])); setClients(cacheGet("nexo_clients", [])); setOrders(cacheGet("nexo_orders", []));
+            setCollectionRows(cacheGet("nexo_collections", [])); setSummary(cacheGet("nexo_summary", null));
+        });
     }, [session]);
     useEffect(() => {
         if (session && active === "Inicio")
-            void refreshCollections();
+            queueMicrotask(() => void refreshCollections());
     }, [active, refreshCollections, session]);
     useEffect(() => {
         if (session)
-            refresh().then(syncQueue);
+            queueMicrotask(() => void refresh().then(syncQueue));
     }, [active, session, refresh, syncQueue]);
     useEffect(() => {
         if (online && session)
-            syncQueue().then(refresh);
-    }, [online]);
+            queueMicrotask(() => void syncQueue().then(refresh));
+    }, [online, refresh, session, syncQueue]);
     useEffect(() => {
         if (!session || canViewModule(session, active))
             return;
         const first = menu.find(label => canViewModule(session, label));
         if (first)
-            setActive(first);
+            queueMicrotask(() => setActive(first));
     }, [active, session]);
     async function logout() {
         try {
@@ -483,7 +494,7 @@ function Dashboard({ summary, orders, clients, receivables, onNavigate, session 
             <article><span>Ticket promedio</span><strong>{money(ticketAverage)}</strong><small>{monthOrders.length} ventas este mes</small></article>
             <article className="inactive-card"><span>Clientes inactivos</span><strong>{inactiveClients.length}</strong><small>Sin compra en 30 días</small></article>
         </section>
-        <div className="home-alerts">{birthdayCount > 0 && <button className="birthday-alert" onClick={() => onNavigate("Clientes")}><span className="birthday-cake">🎂</span><div><small>{todayCount ? "¡CUMPLEAÑOS DE HOY!" : "CUMPLEAÑOS PRÓXIMOS"}</small><strong>{birthdayCount}</strong><p>{birthdays.length ? birthdays.slice(0, 3).map(c => `${c.nombre} ${c.apellidos}`.trim()).join(", ") : "Revisa tu cartera de clientes"} · Toca para ver</p></div></button>}{debts.length > 0 && <button className={`receivable-alert ${urgent.length ? "urgent" : ""}`} onClick={() => onNavigate("Cobranza y rendición")}><span>⚠</span><div><small>{urgent.length ? "COBRANZAS ATRASADAS" : "CUENTAS POR COBRAR"}</small><strong>{money(debtTotal)}</strong><p>{debts.length} cliente(s) pendiente(s){urgent.length ? ` · ${urgent.length} con 4 días o más` : ""}</p></div></button>}</div>
+        <div className="home-alerts"><button className={`birthday-alert ${birthdayCount ? "" : "birthday-empty"}`} onClick={() => onNavigate("Clientes")}><span className="birthday-cake">🎂</span><div><small>{todayCount ? "¡CUMPLEAÑOS DE HOY!" : "CUMPLEAÑOS PENDIENTES"}</small><strong>{birthdayCount}</strong><p>{birthdays.length ? birthdays.slice(0, 3).map(c => `${c.nombre} ${c.apellidos}`.trim()).join(", ") : "0 cumpleaños próximos · Toca para revisar clientes"}</p></div></button>{debts.length > 0 && <button className={`receivable-alert ${urgent.length ? "urgent" : ""}`} onClick={() => onNavigate("Cobranza y rendición")}><span>⚠</span><div><small>{urgent.length ? "COBRANZAS ATRASADAS" : "CUENTAS POR COBRAR"}</small><strong>{money(debtTotal)}</strong><p>{debts.length} cliente(s) pendiente(s){urgent.length ? ` · ${urgent.length} con 4 días o más` : ""}</p></div></button>}</div>
         {!isPreventa && <section className="manager-secondary-metrics"><article><p>Clientes registrados</p><strong>{summary?.totalClientes || clients.length}</strong><small>{inactiveClients.length} requieren seguimiento</small></article><article><p>Productos</p><strong>{summary?.totalProductos || 0}</strong><small>{summary?.stockBajo || 0} con stock bajo</small></article><article><p>Valor de inventario</p><strong>{money(summary?.valorTotalInventario)}</strong><small>{summary?.sinStock || 0} sin stock</small></article></section>}
         <section className="panel data-panel"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Últimos pedidos registrados</p></div></div><SimpleOrders rows={orders.slice(0, isPreventa ? 5 : 8)}/></section>
     </div>;
@@ -635,12 +646,13 @@ function Orders({ orders, call, refresh, notify }: {
     const [detail, setDetail] = useState<Order | null>(null);
     const [query, setQuery] = useState("");
     const [printing, setPrinting] = useState(false);
-    const [orderStatus, setOrderStatus] = useState("TODOS");
-    const [orderEmission, setOrderEmission] = useState("TODAS");
-    const [orderClient, setOrderClient] = useState("TODOS");
+    const [editing, setEditing] = useState(false);
+    const [savingEdit, setSavingEdit] = useState(false);
+    const [editClient, setEditClient] = useState("");
+    const [editObs, setEditObs] = useState("");
+    const [editItems, setEditItems] = useState<Array<{ codigo: string; nombre: string; cantidad: number; precioUnitario: number }>>([]);
     const states = ["POR COMPRAR", "COMPRADO", "LISTO PARA ENTREGA", "OBSERVADO"];
-    const orderClients = [...new Set(orders.map(o => o.cliente).filter(Boolean))].sort();
-    const visible = orders.filter(o => JSON.stringify(o).toLowerCase().includes(query.toLowerCase()) && (orderStatus === "TODOS" || String(o.estadoEntrega || "POR COMPRAR").toUpperCase() === orderStatus) && (orderEmission === "TODAS" || (orderEmission === "EMITIDA" ? Boolean(o.codigoImpresion) : !o.codigoImpresion)) && (orderClient === "TODOS" || o.cliente === orderClient));
+    const visible = orders.filter(o => JSON.stringify(o).toLowerCase().includes(query.toLowerCase()));
     async function status(o: Order, value: string) {
         try {
             let message = "";
@@ -687,7 +699,9 @@ function Orders({ orders, call, refresh, notify }: {
             setPrinting(false);
         }
     }
-    return <div><Heading eyebrow="OPERACIÓN Y DESPACHO" title="Pedidos y emisión" text="Controla la compra, preparación y emisión de cada pedido."/><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar pedido…"/></label></section><section className="panel data-panel"><SimpleOrders rows={visible} onDetail={setDetail} showEmission/></section>{detail && <div className="modal-bg"><section className="order-detail"><button className="close" onClick={() => setDetail(null)}>×</button><h2>{detail.ventaId}</h2><p>{detail.cliente} · {detail.fecha}</p><label>Estado operativo<select value={detail.estadoEntrega || "POR COMPRAR"} onChange={e => status(detail, e.target.value)}>{states.map(s => <option key={s}>{s}</option>)}</select></label><div className={`emission-summary ${detail.codigoImpresion ? "emitted" : ""}`}><b>{detail.codigoImpresion ? "✓ Boleta emitida" : "Boleta no emitida"}</b>{detail.codigoImpresion && <small>{detail.codigoImpresion} · {detail.fechaImpresion}</small>}</div><h3>Materiales asociados</h3><div className="detail-items">{detail.items.map(i => <div className="detail-row" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo}</small></span><span>{i.cantidad}</span><span>{money(i.precioUnitario)}</span><span><b>{money(i.subtotal)}</b></span></div>)}</div><div className="detail-total"><span>Total</span><strong>{money(detail.total)}</strong></div><button disabled={printing} onClick={() => printOrder(detail)}>{printing ? "Emitiendo…" : detail.codigoImpresion ? "Reimprimir boleta" : "Emitir e imprimir boleta"}</button></section></div>}</div>;
+    function startEdit(o: Order) { setEditClient(o.cliente); setEditObs(o.observaciones || ""); setEditItems(o.items.map(i => ({ codigo: i.codigo, nombre: i.nombre, cantidad: Number(i.cantidad), precioUnitario: Number(i.precioUnitario) }))); setEditing(true); }
+    async function saveEdit() { if (!detail || savingEdit) return; if (!editClient.trim() || !editItems.length || editItems.some(i => !(i.cantidad > 0))) return notify("Revisa el cliente y las cantidades del pedido."); setSavingEdit(true); try { const result = await call<{ ok: boolean; mensaje: string; total?: number }>("corregirPedido", [{ ventaId: detail.ventaId, cliente: editClient.trim(), observaciones: editObs, items: editItems.map(i => ({ codigo: i.codigo, cantidad: i.cantidad })) }]); if (!result.ok) throw new Error(result.mensaje); notify(result.mensaje); setEditing(false); setDetail(null); await refresh(); } catch (x) { notify(x instanceof Error ? x.message : "No se pudo editar el pedido"); } finally { setSavingEdit(false); } }
+    return <div className="orders-page"><Heading eyebrow="OPERACIÓN Y DESPACHO" title="Pedidos y emisión" text="Controla la compra, preparación y emisión de cada pedido."/><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar pedido…"/></label></section><section className="panel data-panel"><SimpleOrders rows={visible} onDetail={setDetail} showEmission/></section>{detail && <div className="modal-bg"><section className="order-detail"><button className="close" onClick={() => { setDetail(null); setEditing(false); }}>×</button><h2>{detail.ventaId}</h2>{editing ? <div className="order-editor"><label>Cliente<input value={editClient} onChange={e => setEditClient(e.target.value)}/></label><label>Observaciones<textarea value={editObs} onChange={e => setEditObs(e.target.value)}/></label><h3>Materiales y cantidades</h3>{editItems.map((i, index) => <div className="order-edit-item" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo} · {money(i.precioUnitario)}</small></span><input aria-label={`Cantidad de ${i.nombre}`} type="number" min="0.01" step="0.01" value={i.cantidad} onChange={e => setEditItems(rows => rows.map((row, n) => n === index ? { ...row, cantidad: Number(e.target.value) } : row))}/><button onClick={() => setEditItems(rows => rows.filter((_, n) => n !== index))}>×</button></div>)}<div className="detail-total"><span>Nuevo total</span><strong>{money(editItems.reduce((sum, i) => sum + i.cantidad * i.precioUnitario, 0))}</strong></div><div className="order-actions"><button onClick={() => setEditing(false)}>Cancelar</button><button className="primary" disabled={savingEdit} onClick={saveEdit}>{savingEdit ? "Guardando…" : "Guardar cambios"}</button></div></div> : <><p>{detail.cliente} · {detail.fecha}</p><label>Estado operativo<select value={detail.estadoEntrega || "POR COMPRAR"} onChange={e => status(detail, e.target.value)}>{states.map(s => <option key={s}>{s}</option>)}</select></label><div className={`emission-summary ${detail.codigoImpresion ? "emitted" : ""}`}><b>{detail.codigoImpresion ? "✓ Boleta emitida" : "Boleta no emitida"}</b>{detail.codigoImpresion && <small>{detail.codigoImpresion} · {detail.fechaImpresion}</small>}</div><h3>Materiales asociados</h3><div className="detail-items">{detail.items.map(i => <div className="detail-row" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo}</small></span><span>{i.cantidad}</span><span>{money(i.precioUnitario)}</span><span><b>{money(i.subtotal)}</b></span></div>)}</div><div className="detail-total"><span>Total</span><strong>{money(detail.total)}</strong></div><div className="order-actions"><button onClick={() => startEdit(detail)}>✎ Editar pedido</button><button disabled={printing} onClick={() => printOrder(detail)}>{printing ? "Emitiendo…" : detail.codigoImpresion ? "Reimprimir boleta" : "Emitir e imprimir boleta"}</button></div></>}</section></div>}</div>;
 }
 function Collections({ rows, loading, load, call, notify }: {
     rows: Order[];
@@ -768,7 +782,7 @@ function Inventory({ products, call, refresh, notify, master }: {
     master: boolean;
 }) {
     const tabs = ["Inventario", "Registrar material", "Ingresar stock", "Carga masiva", "Editar", "Historial"] as const;
-    const [tab, setTab] = useState<(typeof tabs)[number]>("Inventario"), [query, setQuery] = useState(""), [history, setHistory] = useState<any[]>([]), [selected, setSelected] = useState<Product | null>(null);
+    const [tab, setTab] = useState<(typeof tabs)[number]>("Inventario"), [query, setQuery] = useState(""), [history, setHistory] = useState<ApiRecord[]>([]), [selected, setSelected] = useState<Product | null>(null);
     const [productForm, setProductForm] = useState({ codigo: "", nombre: "", unidad: "Unidades", grupo: "General", stockMin: 0, precioCosto: 0, precioVenta: 0 });
     const [lists, setLists] = useState({ unidades: ["Unidades"], grupos: ["General"] });
     const [income, setIncome] = useState({ codigo: "", fecha: today(), tipo: "INGRESO", cantidad: 1, observaciones: "" });
@@ -783,7 +797,7 @@ function Inventory({ products, call, refresh, notify, master }: {
     const visible = activeProducts.filter(p => JSON.stringify(p).toLowerCase().includes(query.toLowerCase()));
     const loadHistory = useCallback(async () => {
         try {
-            setHistory(await call<any[]>("obtenerHistorial", [{}]));
+            setHistory(await call<ApiRecord[]>("obtenerHistorial", [{}]));
         }
         catch (x) {
             notify(x instanceof Error ? x.message : "No se pudo cargar el historial");
@@ -791,11 +805,11 @@ function Inventory({ products, call, refresh, notify, master }: {
     }, [call, notify]);
     useEffect(() => {
         if (tab === "Historial")
-            loadHistory();
+            queueMicrotask(() => void loadHistory());
     }, [loadHistory, tab]);
     useEffect(() => {
         if (tab === "Registrar material" && !productForm.codigo.trim())
-            setProductForm(f => ({ ...f, codigo: nextCode }));
+            queueMicrotask(() => setProductForm(f => ({ ...f, codigo: nextCode })));
     }, [nextCode, productForm.codigo, tab]);
     useEffect(() => {
         call<{
@@ -869,12 +883,12 @@ function Inventory({ products, call, refresh, notify, master }: {
         const headers = lines.shift()?.split(sep).map(x => x.trim().toLowerCase()) || [];
         const rows = lines.map((line, i) => { const v = line.split(sep); const get = (name: string) => v[headers.indexOf(name)] || ""; return { filaExcel: i + 2, codigo: get("codigo") || get("código"), tipo: get("tipo") || "INGRESO", cantidadCarga: Number(get("cantidad")), factor: Number(get("factor") || 1), costoCompra: Number(get("costo") || 0), fecha: get("fecha") || today(), observacion: get("observacion") || "Carga masiva NexoVenta" }; });
         try {
-            const check = await call<any>("validarCargaMasivaInventario", [rows]);
+            const check = await call<ApiRecord>("validarCargaMasivaInventario", [rows]);
             if (!check.ok)
                 return notify(check.mensaje);
             if (!confirm(check.mensaje + "\n¿Importar ahora?"))
                 return;
-            const result = await call<any>("importarCargaMasivaInventario", [rows]);
+            const result = await call<ApiRecord>("importarCargaMasivaInventario", [rows]);
             notify(result.mensaje);
             await refresh();
             setTab("Inventario");
@@ -900,21 +914,21 @@ function Finance({ call, notify }: {
     const [period, setPeriod] = useState(month());
     const [view, setView] = useState("MENSUAL");
     const [indicator, setIndicator] = useState("INGRESOS");
-    const [plan, setPlan] = useState<any>(null);
-    const [accounting, setAccounting] = useState<any>(null);
-    const [curve, setCurve] = useState<any>(null);
-    const [rendition, setRendition] = useState<any>(null);
+    const [plan, setPlan] = useState<PlanData | null>(null);
+    const [accounting, setAccounting] = useState<AccountingData | null>(null);
+    const [curve, setCurve] = useState<CurveData | null>(null);
+    const [rendition, setRendition] = useState<RenditionData | null>(null);
     const [goalOpen, setGoalOpen] = useState(false);
     const [receptionOpen, setReceptionOpen] = useState(false);
     const [goalForm, setGoalForm] = useState({ objetivo: 0, presupuesto: 0 });
     const [reception, setReception] = useState({ efectivo: 0, yape: 0, otros: 0, observacion: "" });
     const load = useCallback(async () => {
         const cacheKey = `nexo_finance_${period}_${indicator}_${view}`;
-        const cached = cacheGet<any>(cacheKey, cacheGet<any>("nexo_finance_latest", null));
+        const cached = cacheGet<{ plan?: PlanData; accounting?: AccountingData; curve?: CurveData; rendition?: RenditionData } | null>(cacheKey, cacheGet("nexo_finance_latest", null));
         if (cached) {
-            setPlan(cached.plan);
-            setAccounting(cached.accounting);
-            setCurve(cached.curve);
+            setPlan(cached.plan || null);
+            setAccounting(cached.accounting || null);
+            setCurve(cached.curve || null);
             if (cached.rendition)
                 setRendition(cached.rendition);
         }
@@ -923,17 +937,17 @@ function Finance({ call, notify }: {
             setRendition(collectionRendition(cachedCollections));
         try {
             const [pResult, aResult, cResult] = await Promise.allSettled([
-                call<any>("obtenerPlaneamientoMensual", [period]),
-                call<any>("obtenerContabilidadDiaria", [period]),
-                call<any>("obtenerCurvaS", [indicator, view, `${period}-01`, true]),
+                call<PlanData>("obtenerPlaneamientoMensual", [period]),
+                call<AccountingData>("obtenerContabilidadDiaria", [period]),
+                call<CurveData>("obtenerCurvaS", [indicator, view, `${period}-01`, true]),
             ]);
             const p = pResult.status === "fulfilled" ? pResult.value : cached?.plan;
             const a = aResult.status === "fulfilled" ? aResult.value : cached?.accounting;
             const c = cResult.status === "fulfilled" ? cResult.value : cached?.curve;
-            setPlan(p);
-            setAccounting(a);
-            setCurve(c);
-            const snapshot = { plan: p, accounting: a, curve: c, rendition };
+            setPlan(p || null);
+            setAccounting(a || null);
+            setCurve(c || null);
+            const snapshot = { plan: p, accounting: a, curve: c, rendition: cacheGet<RenditionData | null>("nexo_finance_rendition", null) };
             cacheSet(cacheKey, snapshot);
             cacheSet("nexo_finance_latest", snapshot);
         }
@@ -941,7 +955,7 @@ function Finance({ call, notify }: {
             notify(x instanceof Error ? x.message : "No se cargó finanzas");
         }
         try {
-            const r = await call<any>("obtenerRendicionDia", [today()]);
+            const r = await call<RenditionData>("obtenerRendicionDia", [today()]);
             const declarado = r?.declarado || {};
             const total = Number(declarado.efectivo || 0) + Number(declarado.yape || 0) + Number(declarado.otros || 0);
             if (total > 0 || r?.validacion) {
@@ -954,24 +968,24 @@ function Finance({ call, notify }: {
         catch {
             try {
                 const [cobranzaResult, gastosResult] = await Promise.allSettled([
-                    call<any>("obtenerCobranzaPedidos", [{ desde: `${today().slice(0, 4)}-01-01`, hasta: today(), texto: "" }]),
-                    call<any>("obtenerGastosOperacion", [today()]),
+                    call<ApiRecord[]>("obtenerCobranzaPedidos", [{ desde: `${today().slice(0, 4)}-01-01`, hasta: today(), texto: "" }]),
+                    call<ApiRecord[]>("obtenerGastosOperacion", [today()]),
                 ]);
                 const raw = cobranzaResult.status === "fulfilled" ? cobranzaResult.value : [];
-                const cobranza = Array.isArray(raw) ? raw : raw?.pedidos || [];
-                const pendientes = cobranza.filter((row: any) => {
+                const cobranza = raw;
+                const pendientes = cobranza.filter((row: ApiRecord) => {
                     const cobrado = ["efectivo", "yape", "plin", "transferencia", "pos", "otros"]
                         .reduce((total, key) => total + Number(row?.[key] || 0), 0);
                     return cobrado > 0;
                 });
-                const sum = (key: string) => pendientes.reduce((total: number, row: any) => total + Number(row?.[key] || 0), 0);
+                const sum = (key: string) => pendientes.reduce((total: number, row: ApiRecord) => total + Number(row?.[key] || 0), 0);
                 const efectivo = sum("efectivo");
                 const yape = sum("yape") + sum("plin");
                 const otros = sum("transferencia") + sum("pos") + sum("otros");
                 const rawGastos = gastosResult.status === "fulfilled" ? gastosResult.value : [];
-                const gastos = Array.isArray(rawGastos) ? rawGastos : rawGastos?.movimientos || rawGastos?.gastos || [];
-                const gastosEfectivo = gastos.reduce((total: number, row: any) => String(row?.canal || row?.medio || "").toUpperCase() === "EFECTIVO" ? total + Number(row?.monto || 0) : total, 0);
-                const gastosVirtuales = gastos.reduce((total: number, row: any) => String(row?.canal || row?.medio || "").toUpperCase() !== "EFECTIVO" ? total + Number(row?.monto || 0) : total, 0);
+                const gastos = rawGastos;
+                const gastosEfectivo = gastos.reduce((total: number, row: ApiRecord) => String(row?.canal || row?.medio || "").toUpperCase() === "EFECTIVO" ? total + Number(row?.monto || 0) : total, 0);
+                const gastosVirtuales = gastos.reduce((total: number, row: ApiRecord) => String(row?.canal || row?.medio || "").toUpperCase() !== "EFECTIVO" ? total + Number(row?.monto || 0) : total, 0);
                 const nextRendition = {
                     fecha: today(),
                     fuente: "COBRANZA_PENDIENTE",
@@ -983,7 +997,7 @@ function Finance({ call, notify }: {
                         gastosEfectivo,
                         gastosVirtuales,
                         efectivoEsperado: Math.max(0, efectivo - gastosEfectivo),
-                        pendiente: pendientes.reduce((total: number, row: any) => total + Number(row?.saldo || 0), 0),
+                        pendiente: pendientes.reduce((total: number, row: ApiRecord) => total + Number(row?.saldo || 0), 0),
                     },
                     validacion: null,
                 };
@@ -991,17 +1005,17 @@ function Finance({ call, notify }: {
                 cacheSet("nexo_finance_rendition", nextRendition);
             }
             catch {
-                const previous = cacheGet<any>("nexo_finance_rendition", null);
+                const previous = cacheGet<RenditionData | null>("nexo_finance_rendition", null);
                 if (previous)
                     setRendition(previous);
             }
         }
     }, [call, indicator, notify, period, view]);
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => { queueMicrotask(() => void load()); }, [load]);
     function openGoals() {
         const planRows = plan?.filas || [];
-        const objetivo = planRows.filter((row: any) => String(row.tipo || "").includes("INGRESO") || String(row.categoria || "").toUpperCase() === "VENTAS").reduce((sum: number, row: any) => sum + Number(row.monto || 0), 0);
-        const presupuesto = planRows.filter((row: any) => String(row.tipo || "").includes("GASTO")).reduce((sum: number, row: any) => sum + Number(row.monto || 0), 0);
+        const objetivo = planRows.filter((row: FinanceRow) => String(row.tipo || "").includes("INGRESO") || String(row.categoria || "").toUpperCase() === "VENTAS").reduce((sum: number, row: FinanceRow) => sum + Number(row.monto || 0), 0);
+        const presupuesto = planRows.filter((row: FinanceRow) => String(row.tipo || "").includes("GASTO")).reduce((sum: number, row: FinanceRow) => sum + Number(row.monto || 0), 0);
         setGoalForm({ objetivo, presupuesto });
         setGoalOpen(true);
     }
@@ -1035,22 +1049,6 @@ function Finance({ call, notify }: {
             notify(x instanceof Error ? x.message : "No se registró la recepción");
         }
     }
-    async function budget() {
-        const concept = prompt("Concepto presupuestado");
-        if (!concept)
-            return;
-        const amount = Number(prompt("Monto mensual", "0"));
-        const flow = prompt("Tipo: INGRESO o GASTO", "INGRESO")?.toUpperCase();
-        const row = { tipo: flow === "INGRESO" ? "OPERACIÓN INGRESO" : "OPERACIÓN GASTO", categoria: flow === "INGRESO" ? "VENTAS" : "OTROS", concepto: concept, monto: amount, unidad: "DISTRIBUCIÓN" };
-        try {
-            const rows = [...(plan?.filas || []), row];
-            notify(await call<string>("guardarPlaneamientoMensual", [{ periodo: period, filas: rows }]));
-            load();
-        }
-        catch (x) {
-            notify(x instanceof Error ? x.message : "No se guardó");
-        }
-    }
     async function actual() {
         const concept = prompt("Concepto contable");
         if (!concept)
@@ -1070,12 +1068,12 @@ function Finance({ call, notify }: {
     const rs = plan?.resumen || {};
     const cs = curve?.resumen || {};
     const rows = accounting?.filas || [];
-    const sumByType = (type: string) => rows.filter((row: any) => row.tipo === type).reduce((sum: number, row: any) => sum + Object.values(row.valores || {}).reduce((subtotal: number, value: any) => subtotal + Number(value || 0), 0), 0);
+    const sumByType = (type: string) => rows.filter((row: FinanceRow) => row.tipo === type).reduce((sum: number, row: FinanceRow) => sum + Object.values(row.valores || {}).reduce((subtotal: number, value: unknown) => subtotal + Number(value || 0), 0), 0);
     const realExpenses = sumByType("OPERACIÓN GASTO");
     const realInvestment = sumByType("INVERSIÓN");
     const actualRevenue = Number(cs.real || 0);
-    const targetRevenue = (plan?.filas || []).filter((row: any) => String(row.tipo || "").includes("INGRESO") || String(row.categoria || "").toUpperCase() === "VENTAS").reduce((sum: number, row: any) => sum + Number(row.monto || 0), 0) || Number(cs.planeado || rs.ingresos || 0);
-    const expenseBudget = (plan?.filas || []).filter((row: any) => String(row.tipo || "").includes("GASTO")).reduce((sum: number, row: any) => sum + Number(row.monto || 0), 0) || Number(rs.gastos || 0);
+    const targetRevenue = (plan?.filas || []).filter((row: FinanceRow) => String(row.tipo || "").includes("INGRESO") || String(row.categoria || "").toUpperCase() === "VENTAS").reduce((sum: number, row: FinanceRow) => sum + Number(row.monto || 0), 0) || Number(cs.planeado || rs.ingresos || 0);
+    const expenseBudget = (plan?.filas || []).filter((row: FinanceRow) => String(row.tipo || "").includes("GASTO")).reduce((sum: number, row: FinanceRow) => sum + Number(row.monto || 0), 0) || Number(rs.gastos || 0);
     const result = actualRevenue - realExpenses - realInvestment;
     const selectedDate = new Date(`${period}-01T12:00:00`);
     const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
@@ -1109,7 +1107,7 @@ function Reports({ call, notify }: {
             notify(x instanceof Error ? x.message : "No se cargó");
         }
     }, [call, from, notify, query, to]);
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => { queueMicrotask(() => void load()); }, [load]);
     function csv() { const lines = [["Pedido", "Fecha", "Cliente", "Total"], ...rows.map(x => [x.ventaId, x.fecha, x.cliente, x.total])].map(x => x.join(";")).join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([lines], { type: "text/csv" })); a.download = `reporte-${from}-${to}.csv`; a.click(); }
     return <div><Heading eyebrow="INFORMACIÓN HISTÓRICA" title="Reportes" text="Cruza ventas por fechas, cliente, pedido o producto."><button className="primary" onClick={csv}>Exportar CSV</button></Heading><section className="section-tools"><input type="date" value={from} onChange={e => setFrom(e.target.value)}/><input type="date" value={to} onChange={e => setTo(e.target.value)}/><label className="search"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cliente, producto o pedido…"/></label><button onClick={load}>Filtrar</button></section><section className="panel data-panel"><SimpleOrders rows={rows}/></section></div>;
 }
@@ -1124,8 +1122,8 @@ function ProductCurvePicker({ index, color, value, options, onChange }: {
     const [query, setQuery] = useState("");
     const [open, setOpen] = useState(false);
     useEffect(() => {
-        setQuery(selectedProduct ? `${selectedProduct.codigo} · ${selectedProduct.nombre}` : "");
-    }, [selectedProduct?.codigo, selectedProduct?.nombre]);
+        queueMicrotask(() => setQuery(selectedProduct ? `${selectedProduct.codigo} · ${selectedProduct.nombre}` : ""));
+    }, [selectedProduct]);
     const normalized = query.toLowerCase().trim();
     const matches = options.filter(product => !normalized || `${product.codigo} ${product.nombre}`.toLowerCase().includes(normalized)).slice(0, 12);
     return <label className="curve-search-picker"><i style={{ background: color }}></i><input value={query} placeholder={`Buscar producto ${index + 1}…`} onFocus={() => { setQuery(""); setOpen(true); }} onChange={event => { setQuery(event.target.value); setOpen(true); }} onBlur={() => window.setTimeout(() => setOpen(false), 160)} autoComplete="off"/>{value && <button type="button" aria-label={`Quitar producto ${index + 1}`} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(""); setQuery(""); }}>×</button>}{open && <div className="curve-search-results">{matches.map(product => <button type="button" key={product.codigo} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(product.codigo); setQuery(`${product.codigo} · ${product.nombre}`); setOpen(false); }}><b>{product.codigo}</b><span>{product.nombre}</span></button>)}{!matches.length && <small>No se encontraron productos</small>}</div>}</label>;
@@ -1134,15 +1132,15 @@ function Analytics({ call, notify }: {
     call: <T>(f: string, a?: unknown[]) => Promise<T>;
     notify: (s: string) => void;
 }) {
-    const [products, setProducts] = useState<any[]>([]);
-    const [clients, setClients] = useState<any[]>([]);
-    const [dashboard, setDashboard] = useState<any>(null);
+    const [products, setProducts] = useState<ApiRecord[]>([]);
+    const [clients, setClients] = useState<ApiRecord[]>([]);
+    const [dashboard, setDashboard] = useState<AnalysisDashboard | null>(null);
     const [catalog, setCatalog] = useState<Product[]>([]);
     const [orders, setOrders] = useState<Order[]>([]);
     const [year, setYear] = useState(new Date().getFullYear());
     const [selected, setSelected] = useState<string[]>([]);
     const colors = ["#ff6b55", "#2d7dd2", "#23ad78", "#f0a23b", "#8357d9", "#e04f8a", "#5f6b7a", "#16a3a3", "#b5bbc5"];
-    const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    const monthNames = useMemo(() => ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"], []);
     const buildLocalDashboard = useCallback((catalog: Product[], orders: Order[], requested: string[]) => {
         const groups = ["General", "Limpieza", "Ferretería", "Útiles", "Bisutería", "Piñatería", "Cuchillos", "Plásticos", "Otros"];
         const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -1178,7 +1176,7 @@ function Analytics({ call, notify }: {
             slot,
             meses: monthly[code].map(value => Math.round(value * 100) / 100),
             total: Math.round(monthly[code].reduce((sum, value) => sum + value, 0) * 100) / 100
-        }) : null).filter(Boolean);
+        }) : null).filter((item): item is AnalysisSeries => item !== null);
         return {
             meses: monthNames,
             opciones: options,
@@ -1188,17 +1186,17 @@ function Analytics({ call, notify }: {
             totalProductos: options.length,
             totalVentas: Math.round((orders || []).reduce((sum, order) => sum + Number(order.total || 0), 0) * 100) / 100
         };
-    }, [year]);
+    }, [monthNames, year]);
     const load = useCallback(async () => {
         try {
             const [p, c, currentCatalog, currentOrders] = await Promise.all([
-                call<any>("obtenerAnalisis", ["PRODUCTOS", {}]),
-                call<any>("obtenerAnalisis", ["CLIENTES", {}]),
+                call<ApiRecord[]>("obtenerAnalisis", ["PRODUCTOS", {}]),
+                call<ApiRecord[]>("obtenerAnalisis", ["CLIENTES", {}]),
                 call<Product[]>("obtenerCatalogoProductos"),
                 call<Order[]>("obtenerEmisiones", [{ fechaDesde: `${year}-01-01`, fechaHasta: `${year}-12-31`, texto: "" }])
             ]);
-            setProducts(Array.isArray(p) ? p : p?.productos || p?.topProductos || []);
-            setClients(Array.isArray(c) ? c : c?.clientes || c?.topClientes || []);
+            setProducts(p || []);
+            setClients(c || []);
             setCatalog(currentCatalog || []);
             setOrders(currentOrders || []);
             const d = buildLocalDashboard(currentCatalog || [], currentOrders || [], []);
@@ -1209,18 +1207,17 @@ function Analytics({ call, notify }: {
             notify(x instanceof Error ? x.message : "No se cargó análisis");
         }
     }, [buildLocalDashboard, call, notify, year]);
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => { queueMicrotask(() => void load()); }, [load]);
     useEffect(() => {
         if (catalog.length)
-            setDashboard(buildLocalDashboard(catalog, orders, selected));
+            queueMicrotask(() => setDashboard(buildLocalDashboard(catalog, orders, selected)));
     }, [buildLocalDashboard, catalog, orders, selected]);
-    const card = (title: string, rows: any[]) => <article className="panel"><h3>{title}</h3>{rows.slice(0, 10).map((x, i) => <div className="ranking" key={i}><b>{i + 1}</b><span>{x.nombre || x.cliente || x.producto || x.codigo || "Registro"}</span><strong>{money(x.total || x.ventas || x.importe)}</strong></div>)}{!rows.length && <p>No hay ventas suficientes para este análisis.</p>}</article>;
-    const distribution = dashboard?.distribucion || [];
-    const totalGroups = distribution.reduce((sum: number, x: any) => sum + Number(x.cantidad || 0), 0);
-    let angle = 0;
-    const gradient = distribution.map((x: any, i: number) => { const start = angle; angle += totalGroups ? Number(x.cantidad || 0) / totalGroups * 360 : 0; return colors[i] + " " + start + "deg " + angle + "deg"; }).join(",");
-    const series = dashboard?.series || [];
-    const maxValue = Math.max(1, ...series.flatMap((s: any) => s.meses || []));
+    const card = (title: string, rows: ApiRecord[]) => <article className="panel"><h3>{title}</h3>{rows.slice(0, 10).map((x, i) => <div className="ranking" key={i}><b>{i + 1}</b><span>{x.nombre || x.cliente || x.producto || x.codigo || "Registro"}</span><strong>{money(x.total || x.ventas || x.importe)}</strong></div>)}{!rows.length && <p>No hay ventas suficientes para este análisis.</p>}</article>;
+    const distribution = (dashboard?.distribucion || []) as unknown as ApiRecord[];
+    const totalGroups = distribution.reduce((sum: number, x: ApiRecord) => sum + Number(x.cantidad || 0), 0);
+    const gradient = distribution.map((x: ApiRecord, i: number) => { const start = distribution.slice(0, i).reduce((sum: number, item: ApiRecord) => sum + (totalGroups ? Number(item.cantidad || 0) / totalGroups * 360 : 0), 0); const end = start + (totalGroups ? Number(x.cantidad || 0) / totalGroups * 360 : 0); return colors[i] + " " + start + "deg " + end + "deg"; }).join(",");
+    const series = (dashboard?.series || []) as unknown as ApiRecord[];
+    const maxValue = Math.max(1, ...series.flatMap((s: ApiRecord) => s.meses || []));
     const coordinates = (values: number[]) => values.map((value, index) => ({ x: 25 + index * 50, y: 195 - Number(value || 0) / maxValue * 160, value: Number(value || 0) }));
     const curvePath = (values: number[]) => {
         const dots = coordinates(values);
@@ -1232,7 +1229,7 @@ function Analytics({ call, notify }: {
             return `${path} C ${previous.x + distance},${previous.y} ${point.x - distance},${point.y} ${point.x},${point.y}`;
         }, `M ${dots[0].x},${dots[0].y}`);
     };
-    const leader = distribution.slice().sort((a: any, b: any) => b.cantidad - a.cantidad)[0];
+    const leader = distribution.slice().sort((a: ApiRecord, b: ApiRecord) => Number(b.cantidad) - Number(a.cantidad))[0];
     function changeProduct(index: number, code: string) {
         const next = [...selected.slice(0, 3)];
         while (next.length < 3)
@@ -1243,22 +1240,22 @@ function Analytics({ call, notify }: {
         next[index] = code;
         setSelected(next);
     }
-    return <div><Heading eyebrow="INTELIGENCIA COMERCIAL" title="Análisis de ventas" text="Compara productos por mes y revisa la composición de tu inventario."><div className="analysis-heading-actions"><select value={year} onChange={e => setYear(Number(e.target.value))}>{[0, 1, 2, 3].map(n => <option key={n} value={new Date().getFullYear() - n}>{new Date().getFullYear() - n}</option>)}</select><button onClick={load}>↻ Actualizar</button></div></Heading><section className="analysis-metrics"><article><small>Ventas del año</small><strong>{money(dashboard?.totalVentas)}</strong></article><article><small>Productos registrados</small><strong>{dashboard?.totalProductos || 0}</strong></article><article><small>Grupo principal</small><strong>{leader?.nombre || "—"}</strong><span>{leader?.cantidad || 0} productos</span></article><article><small>Curvas comparadas</small><strong>{series.length} / 3</strong></article></section><section className="analysis-main-grid"><article className="panel trend-panel"><div className="chart-title"><div><h3>Ventas por mes</h3><p>Importe mensual por producto · {year}</p></div></div><div className="product-curve-selectors">{[0, 1, 2].map(i => <ProductCurvePicker key={i} index={i} color={colors[i]} value={selected[i] || ""} options={dashboard?.opciones || []} onChange={code => changeProduct(i, code)}/>)}</div><div className="line-chart"><div className="chart-gridlines">{[0, 1, 2, 3].map(x => <i key={x}></i>)}</div><svg viewBox="0 0 600 220" preserveAspectRatio="none" aria-label="Ventas mensuales comparadas">{series.map((s: any, i: number) => <g key={s.codigo}><path d={curvePath(s.meses)} fill="none" stroke={colors[s.slot ?? i]} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{coordinates(s.meses).filter(point => point.value > 0).map((point, pointIndex) => <circle key={pointIndex} cx={point.x} cy={point.y} r="5" fill="#fff" stroke={colors[s.slot ?? i]} strokeWidth="3"/>)}</g>)}</svg><div className="month-axis">{(dashboard?.meses?.length ? dashboard.meses : monthNames).map((m: string) => <span key={m}>{m}</span>)}</div></div><div className="curve-legend">{series.map((s: any, i: number) => <div key={s.codigo}><i style={{ background: colors[s.slot ?? i] }}></i><span>{s.nombre}</span><b>{money(s.total)}</b></div>)}</div></article><article className="panel donut-panel"><div className="chart-title"><div><h3>Productos por grupo</h3><p>Distribución del catálogo actual</p></div></div><div className="donut-wrap"><div className="donut-chart" style={{ background: "conic-gradient(" + (gradient || "#eef0f4 0deg 360deg") + ")" }}><span><b>{totalGroups}</b><small>productos</small></span></div><div className="donut-legend">{distribution.map((g: any, i: number) => <div key={g.nombre}><i style={{ background: colors[i] }}></i><span>{g.nombre}</span><b>{g.cantidad}</b><small>{totalGroups ? (g.cantidad / totalGroups * 100).toFixed(1) : "0.0"}%</small></div>)}</div></div></article></section><section className="analytics-grid ranking-grid">{card("Top 10 · productos más vendidos", products)}{card("Top 10 · clientes que más compran", clients)}</section></div>;
+    return <div><Heading eyebrow="INTELIGENCIA COMERCIAL" title="Análisis de ventas" text="Compara productos por mes y revisa la composición de tu inventario."><div className="analysis-heading-actions"><select value={year} onChange={e => setYear(Number(e.target.value))}>{[0, 1, 2, 3].map(n => <option key={n} value={new Date().getFullYear() - n}>{new Date().getFullYear() - n}</option>)}</select><button onClick={load}>↻ Actualizar</button></div></Heading><section className="analysis-metrics"><article><small>Ventas del año</small><strong>{money(dashboard?.totalVentas)}</strong></article><article><small>Productos registrados</small><strong>{dashboard?.totalProductos || 0}</strong></article><article><small>Grupo principal</small><strong>{leader?.nombre || "—"}</strong><span>{leader?.cantidad || 0} productos</span></article><article><small>Curvas comparadas</small><strong>{series.length} / 3</strong></article></section><section className="analysis-main-grid"><article className="panel trend-panel"><div className="chart-title"><div><h3>Ventas por mes</h3><p>Importe mensual por producto · {year}</p></div></div><div className="product-curve-selectors">{[0, 1, 2].map(i => <ProductCurvePicker key={i} index={i} color={colors[i]} value={selected[i] || ""} options={dashboard?.opciones || []} onChange={code => changeProduct(i, code)}/>)}</div><div className="line-chart"><div className="chart-gridlines">{[0, 1, 2, 3].map(x => <i key={x}></i>)}</div><svg viewBox="0 0 600 220" preserveAspectRatio="none" aria-label="Ventas mensuales comparadas">{series.map((s: ApiRecord, i: number) => <g key={s.codigo}><path d={curvePath(s.meses)} fill="none" stroke={colors[s.slot ?? i]} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{coordinates(s.meses).filter(point => point.value > 0).map((point, pointIndex) => <circle key={pointIndex} cx={point.x} cy={point.y} r="5" fill="#fff" stroke={colors[s.slot ?? i]} strokeWidth="3"/>)}</g>)}</svg><div className="month-axis">{(dashboard?.meses?.length ? dashboard.meses : monthNames).map((m: string) => <span key={m}>{m}</span>)}</div></div><div className="curve-legend">{series.map((s: ApiRecord, i: number) => <div key={s.codigo}><i style={{ background: colors[s.slot ?? i] }}></i><span>{s.nombre}</span><b>{money(s.total)}</b></div>)}</div></article><article className="panel donut-panel"><div className="chart-title"><div><h3>Productos por grupo</h3><p>Distribución del catálogo actual</p></div></div><div className="donut-wrap"><div className="donut-chart" style={{ background: "conic-gradient(" + (gradient || "#eef0f4 0deg 360deg") + ")" }}><span><b>{totalGroups}</b><small>productos</small></span></div><div className="donut-legend">{distribution.map((g: ApiRecord, i: number) => <div key={g.nombre}><i style={{ background: colors[i] }}></i><span>{g.nombre}</span><b>{g.cantidad}</b><small>{totalGroups ? (Number(g.cantidad) / totalGroups * 100).toFixed(1) : "0.0"}%</small></div>)}</div></div></article></section><section className="analytics-grid ranking-grid">{card("Top 10 · productos más vendidos", products)}{card("Top 10 · clientes que más compran", clients)}</section></div>;
 }
 function Settings({ call, notify, session }: {
     call: <T>(f: string, a?: unknown[]) => Promise<T>;
     notify: (s: string) => void;
     session: Session;
 }) {
-    const [users, setUsers] = useState<any[]>([]);
+    const [users, setUsers] = useState<UserRecord[]>([]);
     const [savingUser, setSavingUser] = useState("");
     const [dirty, setDirty] = useState<string[]>([]);
     const [query, setQuery] = useState("");
     const [profileFilter, setProfileFilter] = useState("TODOS");
-    const [editing, setEditing] = useState<any | null>(null);
+    const [editing, setEditing] = useState<UserRecord | null>(null);
     const load = useCallback(() => {
         if (session.perfil === "MASTER")
-            call<any[]>("obtenerUsuarios").then(rows => { setUsers((rows || []).map(u => ({ ...u, permisos: Array.isArray(u.permisos) && u.permisos.length ? u.permisos : defaultPermissions(u.perfil) }))); setDirty([]); }).catch(() => undefined);
+            call<UserRecord[]>("obtenerUsuarios").then(rows => { setUsers((rows || []).map(u => ({ ...u, permisos: Array.isArray(u.permisos) && u.permisos.length ? u.permisos : defaultPermissions(u.perfil) }))); setDirty([]); }).catch(() => undefined);
     }, [call, session.perfil]);
     useEffect(() => { load(); }, [load]);
     async function action(fn: string) {
@@ -1273,15 +1270,15 @@ function Settings({ call, notify, session }: {
     }
     function markDirty(usuario: string) { setDirty(current => current.includes(usuario) ? current : [...current, usuario]); }
     function createUser() { setEditing({ usuario: "", nombre: "", password: "", perfil: "PREVENTA", estado: "ACTIVO", comentarios: "", permisos: defaultPermissions("PREVENTA"), nuevo: true }); }
-    function toggle(u: any) { const next = { ...u, estado: u.estado === "ACTIVO" ? "BLOQUEADO" : "ACTIVO" }; setUsers(current => current.map(row => row.usuario === u.usuario ? next : row)); markDirty(u.usuario); }
-    function setPermission(u: any, permission: string, enabled: boolean) {
+    function toggle(u: UserRecord) { const next = { ...u, estado: u.estado === "ACTIVO" ? "BLOQUEADO" : "ACTIVO" }; setUsers(current => current.map(row => row.usuario === u.usuario ? next : row)); markDirty(u.usuario); }
+    function setPermission(u: UserRecord, permission: string, enabled: boolean) {
         const permisos = enabled ? Array.from(new Set([...(u.permisos || []), permission])) : (u.permisos || []).filter((x: string) => x !== permission);
         const next = { ...u, permisos };
         setUsers(current => current.map(row => row.usuario === u.usuario ? next : row));
         markDirty(u.usuario);
     }
-    function applyTemplate(u: any, profile: string) { const next = { ...u, perfil: profile, permisos: defaultPermissions(profile) }; setUsers(current => current.map(row => row.usuario === u.usuario ? next : row)); markDirty(u.usuario); }
-    async function saveUser(u: any) {
+    function applyTemplate(u: UserRecord, profile: string) { const next = { ...u, perfil: profile, permisos: defaultPermissions(profile) }; setUsers(current => current.map(row => row.usuario === u.usuario ? next : row)); markDirty(u.usuario); }
+    async function saveUser(u: UserRecord) {
         if (u.perfil === "MASTER" && (!u.permisos.includes("configuracion") || u.estado !== "ACTIVO") && u.usuario === session.usuario) {
             notify("Por seguridad no puedes bloquearte ni quitarte Configuración.");
             return;
