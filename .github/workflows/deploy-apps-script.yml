@@ -1,0 +1,64 @@
+name: Deploy Apps Script
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "AppsScript/**"
+      - ".github/workflows/deploy-apps-script.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apps-script-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install clasp
+        run: npm install --global @google/clasp
+
+      - name: Configure clasp credentials
+        shell: bash
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          CLASP_JSON: ${{ secrets.CLASP_JSON }}
+        run: |
+          test -n "$CLASPRC_JSON" || (echo "Missing CLASPRC_JSON secret" && exit 1)
+          test -n "$CLASP_JSON" || (echo "Missing CLASP_JSON secret" && exit 1)
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          printf '%s' "$CLASP_JSON" > .clasp.json
+
+      - name: Push source to Apps Script
+        run: clasp push --force
+
+      - name: Create immutable Apps Script version
+        id: version
+        shell: bash
+        run: |
+          OUTPUT="$(clasp version "GitHub ${GITHUB_SHA::7}")"
+          echo "$OUTPUT"
+          VERSION="$(printf '%s' "$OUTPUT" | grep -oE '[0-9]+' | tail -1)"
+          test -n "$VERSION" || (echo "Could not determine Apps Script version" && exit 1)
+          echo "number=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update production web app deployment
+        env:
+          DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+          VERSION: ${{ steps.version.outputs.number }}
+        run: |
+          test -n "$DEPLOYMENT_ID" || (echo "Missing APPS_SCRIPT_DEPLOYMENT_ID secret" && exit 1)
+          clasp redeploy "$DEPLOYMENT_ID" "$VERSION" "GitHub $GITHUB_SHA"
