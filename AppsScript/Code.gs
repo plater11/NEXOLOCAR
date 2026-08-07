@@ -279,7 +279,7 @@ function asegurarHojas(){
   const libro=ss();
   asegurarUsuarios();
   let p=libro.getSheetByName(HOJA_PRODUCTOS)||libro.insertSheet(HOJA_PRODUCTOS);
-  if(p.getLastRow()===0){p.getRange(1,1,1,13).setValues([["Código","Nombre","Unidad","Grupo","Stock Mínimo","Precio Costo","Precio Venta","Imagen Base64","Fecha Creación","Promoción Activa","Cantidad Promo","Precio Promo","Descripción Promo"]]);p.getRange(1,1,1,13).setBackground('#5DADE2').setFontColor('white').setFontWeight('bold');p.getRange('A:A').setNumberFormat('@');p.autoResizeColumns(1,13);}
+  if(p.getLastRow()===0){p.getRange(1,1,1,19).setValues([["Código","Nombre","Unidad","Grupo","Stock Mínimo","Precio Costo","Precio Venta","Imagen Base64","Fecha Creación","Promoción Activa","Cantidad Promo","Precio Promo","Descripción Promo","Nombre Presentación","Factor Presentación","Precio Presentación","Permite Fraccionamiento","Fracciones Permitidas","Controla Decimales"]]);p.getRange(1,1,1,19).setBackground('#5DADE2').setFontColor('white').setFontWeight('bold');p.getRange('A:A').setNumberFormat('@');p.autoResizeColumns(1,19);}
   let m=libro.getSheetByName(HOJA_MOVIMIENTOS)||libro.insertSheet(HOJA_MOVIMIENTOS);
   if(m.getLastRow()===0){m.getRange(1,1,1,10).setValues([["Código","Fecha","Tipo","Cantidad","Usuario","Timestamp","Observaciones","Stock Resultante","Venta ID","Cliente"]]);m.getRange(1,1,1,10).setBackground('#5DADE2').setFontColor('white').setFontWeight('bold');m.getRange('A:A').setNumberFormat('@');m.autoResizeColumns(1,10);}
   let v=libro.getSheetByName(HOJA_VENTAS)||libro.insertSheet(HOJA_VENTAS);
@@ -307,8 +307,8 @@ function migrarColumnasVentas(){
 
 function migrarColumnasProductos(){
   const sh=ss().getSheetByName(HOJA_PRODUCTOS); if(!sh) return;
-  const headers=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),13)).getValues()[0];
-  const requeridos=["Código","Nombre","Unidad","Grupo","Stock Mínimo","Precio Costo","Precio Venta","Imagen Base64","Fecha Creación","Promoción Activa","Cantidad Promo","Precio Promo","Descripción Promo"];
+  const headers=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),19)).getValues()[0];
+  const requeridos=["Código","Nombre","Unidad","Grupo","Stock Mínimo","Precio Costo","Precio Venta","Imagen Base64","Fecha Creación","Promoción Activa","Cantidad Promo","Precio Promo","Descripción Promo","Nombre Presentación","Factor Presentación","Precio Presentación","Permite Fraccionamiento","Fracciones Permitidas","Controla Decimales"];
   requeridos.forEach((h,i)=>{ if(headers[i]!==h) sh.getRange(1,i+1).setValue(h); });
 }
 
@@ -551,7 +551,8 @@ function registrarProducto(producto){
     const cantidadPromo=0;
     const precioPromo=0;
     const descripcionPromo='';
-    sh.appendRow([codigo,nombre,producto.unidad||'Unidades',producto.grupo||'General',num(producto.stockMin),num(producto.precioCosto),num(producto.precioVenta),imagen,new Date(),promoActiva,cantidadPromo,precioPromo,descripcionPromo]);
+    const factorPresentacion=Math.max(1,num(producto.factorPresentacion)||inferirFactorPresentacion_(nombre));
+    sh.appendRow([codigo,nombre,producto.unidad||'Unidades',producto.grupo||'General',num(producto.stockMin),num(producto.precioCosto),num(producto.precioVenta),imagen,new Date(),promoActiva,cantidadPromo,precioPromo,descripcionPromo,producto.nombrePresentacion||producto.unidad||'Unidad',factorPresentacion,num(producto.precioPresentacion)||num(producto.precioVenta),String(producto.permiteFraccionamiento||'NO').toUpperCase()==='SI'?'SI':'NO',producto.fraccionesPermitidas||'1/4,1/2,3/4',String(producto.controlaDecimales||'NO').toUpperCase()==='SI'?'SI':'NO']);
     return 'Producto registrado correctamente.';
   }catch(e){return 'Error al registrar producto: '+e.message;}
 }
@@ -577,7 +578,8 @@ function actualizarProducto(producto){
     const descripcionPromo=promoActiva==='SI'?String(producto.descripcionPromo||'').trim():'';
     if(promoActiva==='SI' && (cantidadPromo<2 || precioPromo<=0)) return 'Para activar la promoción ingrese una cantidad mínima de 2 y un precio promocional válido.';
     if(promoActiva==='SI' && precioPromo>=num(producto.precioVenta)*cantidadPromo) return 'El precio promocional total debe ser menor al precio normal por la cantidad mínima.';
-    sh.getRange(fila,1,1,13).setValues([[nuevo,nombre,producto.unidad||'Unidades',producto.grupo||'General',num(producto.stockMin),num(producto.precioCosto),num(producto.precioVenta),imagen,data[fila-1][8]||new Date(),promoActiva,cantidadPromo,precioPromo,descripcionPromo]]);
+    const factorPresentacion=Math.max(1,num(producto.factorPresentacion)||inferirFactorPresentacion_(nombre));
+    sh.getRange(fila,1,1,19).setValues([[nuevo,nombre,producto.unidad||'Unidades',producto.grupo||'General',num(producto.stockMin),num(producto.precioCosto),num(producto.precioVenta),imagen,data[fila-1][8]||new Date(),promoActiva,cantidadPromo,precioPromo,descripcionPromo,producto.nombrePresentacion||producto.unidad||'Unidad',factorPresentacion,num(producto.precioPresentacion)||num(producto.precioVenta),String(producto.permiteFraccionamiento||'NO').toUpperCase()==='SI'?'SI':'NO',producto.fraccionesPermitidas||'1/4,1/2,3/4',String(producto.controlaDecimales||'NO').toUpperCase()==='SI'?'SI':'NO']]);
     if(nuevo!==original){
       const mov=ss().getSheetByName(HOJA_MOVIMIENTOS);
       if(mov&&mov.getLastRow()>1){const vals=mov.getRange(2,1,mov.getLastRow()-1,1).getValues();for(let i=0;i<vals.length;i++)if(normalizarCodigo(vals[i][0])===original)vals[i][0]=nuevo;mov.getRange(2,1,vals.length,1).setValues(vals);}
@@ -598,9 +600,11 @@ function eliminarProducto(codigo){
   }catch(e){return 'Error al eliminar producto: '+e.message;}
 }
 
+function inferirFactorPresentacion_(nombre){const m=String(nombre||'').match(/\bx\s*(\d+)\b/i);return m?Math.max(1,Number(m[1])||1):1;}
+
 function obtenerProductoMap(){
   asegurarHojas(); const data=ss().getSheetByName(HOJA_PRODUCTOS).getDataRange().getValues(); const map={};
-  for(let i=1;i<data.length;i++){const r=data[i], c=normalizarCodigo(r[0]); if(c) map[c]={codigo:c,nombre:r[1]||'',unidad:r[2]||'Unidades',grupo:r[3]||'General',stockMin:num(r[4]),precioCosto:num(r[5]),precioVenta:num(r[6]),imagen:r[7]||'',fechaCreacion:fechaSerializable_(r[8]),promocionActiva:String(r[9]||'NO').toUpperCase(),cantidadPromo:num(r[10]),precioPromo:num(r[11]),descripcionPromo:String(r[12]||'')};}
+  for(let i=1;i<data.length;i++){const r=data[i], c=normalizarCodigo(r[0]); if(c){const factor=Math.max(1,num(r[14])||inferirFactorPresentacion_(r[1]));map[c]={codigo:c,nombre:r[1]||'',unidad:r[2]||'Unidades',grupo:r[3]||'General',stockMin:num(r[4]),precioCosto:num(r[5]),precioVenta:num(r[6]),imagen:r[7]||'',fechaCreacion:fechaSerializable_(r[8]),promocionActiva:String(r[9]||'NO').toUpperCase(),cantidadPromo:num(r[10]),precioPromo:num(r[11]),descripcionPromo:String(r[12]||''),nombrePresentacion:String(r[13]||r[2]||'Unidad'),factorPresentacion:factor,precioPresentacion:num(r[15])||num(r[6]),permiteFraccionamiento:String(r[16]||'NO').toUpperCase(),fraccionesPermitidas:String(r[17]||'1/4,1/2,3/4'),controlaDecimales:String(r[18]||'NO').toUpperCase()};}}
   return map;
 }
 
@@ -867,22 +871,27 @@ function registrarVenta(venta){
     let total=0;
     const items=venta.items.map(it=>{
       const c=normalizarCodigo(it.codigo);
-      const cant=Number(it.cantidad)||0;
       if(!map[c])throw new Error('Producto no existe: '+c);
-      if(cant<=0)throw new Error('Cantidad inválida: '+c);
+      const esPresentacion=it.cantidadUnidadesBase!=null||it.cantidadPresentacion!=null||it.factorPresentacion!=null;
+      const factor=Math.max(1,Number(it.factorPresentacion||map[c].factorPresentacion)||1);
+      const cantidadPresentacion=Number(it.cantidadPresentacion!=null?it.cantidadPresentacion:it.cantidad)||0;
+      const cantidadUnidadesBase=Number(it.cantidadUnidadesBase!=null?it.cantidadUnidadesBase:it.cantidad)||0;
+      if(cantidadPresentacion<=0||cantidadUnidadesBase<=0)throw new Error('Cantidad inválida: '+c);
+      if(esPresentacion&&Math.abs(cantidadUnidadesBase-(cantidadPresentacion*factor))>0.001)throw new Error('La equivalencia de presentación no es válida: '+c);
       const st=Math.max(0,Math.round((stockMap[c]||0)*100)/100);
-      if(st<cant)throw new Error(`Stock insuficiente para ${map[c].nombre}. Disponible: ${st}`);
+      if(st<cantidadUnidadesBase)throw new Error(`Stock insuficiente para ${map[c].nombre}. Disponible: ${st} unidades base`);
       const precioNormal=num(map[c].precioVenta);
       const cantidadPromo=num(map[c].cantidadPromo);
       const precioPromoTotal=num(map[c].precioPromo);
       const precioPromoUnitario=cantidadPromo>0?precioPromoTotal/cantidadPromo:0;
       const promoValida=String(map[c].promocionActiva||'NO').toUpperCase()==='SI' && cantidadPromo>=2 && precioPromoTotal>0 && precioPromoTotal<(precioNormal*cantidadPromo);
-      const promocionAplicada=promoValida && cant>=cantidadPromo;
-      const precio=promocionAplicada?precioPromoUnitario:precioNormal;
-      const descuentoUnitario=Math.max(0,precioNormal-precio);
-      total+=cant*precio;
-      stockMap[c]=st-cant;
-      return {codigo:c,nombre:map[c].nombre,cantidad:cant,precioVenta:precio,precioNormal:precioNormal,promocionAplicada:promocionAplicada?'SI':'NO',cantidadPromo:num(map[c].cantidadPromo),descripcionPromo:promocionAplicada?String(map[c].descripcionPromo||''):'',descuentoTotal:Math.round(descuentoUnitario*cant*100)/100,stockNuevo:Math.max(0,stockMap[c])};
+      const promocionAplicada=!esPresentacion&&promoValida&&cantidadPresentacion>=cantidadPromo;
+      const precioPresentacion=esPresentacion?(num(it.precioPresentacion)||num(map[c].precioPresentacion)||precioNormal):(promocionAplicada?precioPromoUnitario:precioNormal);
+      const subtotal=Math.round(cantidadPresentacion*precioPresentacion*100)/100;
+      const descuentoUnitario=Math.max(0,precioNormal-precioPresentacion);
+      total+=subtotal;
+      stockMap[c]=st-cantidadUnidadesBase;
+      return {codigo:c,nombre:map[c].nombre,cantidad:cantidadPresentacion,cantidadPresentacion:cantidadPresentacion,factorPresentacion:factor,cantidadUnidadesBase:cantidadUnidadesBase,fraccion:Number(it.fraccion)||0,nombrePresentacion:String(it.nombrePresentacion||map[c].nombrePresentacion||map[c].unidad||'Unidad'),precioVenta:precioPresentacion,precioPresentacion:precioPresentacion,precioAplicado:subtotal,subtotal:subtotal,precioNormal:precioNormal,promocionAplicada:promocionAplicada?'SI':'NO',cantidadPromo:num(map[c].cantidadPromo),descripcionPromo:promocionAplicada?String(map[c].descripcionPromo||''):'',descuentoTotal:Math.round(descuentoUnitario*cantidadPresentacion*100)/100,stockNuevo:Math.max(0,stockMap[c])};
     });
 
     const ventaId='V-'+Utilities.formatDate(fechaServidor, Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss')+'-'+Utilities.getUuid().slice(0,4).toUpperCase();
@@ -891,7 +900,7 @@ function registrarVenta(venta){
 
     const usuario=usuarioSistema_();
     const obs=venta.observaciones||`Venta ${ventaId}`;
-    const filas=items.map(it=>[it.codigo,fechaServidor,'SALIDA',it.cantidad,usuario,fechaServidor,obs,it.stockNuevo,ventaId,cliente]);
+    const filas=items.map(it=>[it.codigo,fechaServidor,'SALIDA',it.cantidadUnidadesBase,usuario,fechaServidor,`${obs} · ${it.cantidadPresentacion} ${it.nombrePresentacion} x${it.factorPresentacion}`,it.stockNuevo,ventaId,cliente]);
     if(filas.length){
       movSheet.getRange(movSheet.getLastRow()+1,1,filas.length,10).setValues(filas);
     }
