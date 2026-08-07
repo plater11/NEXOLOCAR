@@ -1683,6 +1683,7 @@ function actualizarEstadoOperativoPedido(p){
 }
 function guardarCobranzaPedido(p){
   requerirPerfil(['MASTER','PREVENTA']);asegurarCobranza_();p=p||{};if(!p.ventaId)return 'Pedido inválido.';
+  const solicitudId=String(p.solicitudId||'').trim(),cache=CacheService.getScriptCache(),cacheKey=solicitudId?('COBRO_'+solicitudId):'';if(cacheKey&&cache.get(cacheKey))return 'Cobranza ya registrada. Se evitó duplicarla.';
   const total=Number(p.totalPedido)||0,ef=Number(p.efectivo)||0,ya=Number(p.yape)||0,pl=Number(p.plin)||0,tr=Number(p.transferencia)||0,pos=Number(p.pos)||0,ot=Number(p.otros)||0,cob=Math.round((ef+ya+pl+tr+pos+ot)*100)/100,saldo=Math.max(0,Math.round((total-cob)*100)/100);
   if(cob>total+0.01)return 'El total cobrado supera el total del pedido.';
   const entrega=String(p.estadoEntrega||'ENTREGADO').toUpperCase();let estado=saldo<=0.01?'TOTAL':(cob>0?'PARCIAL':'PENDIENTE');const solicitado=String(p.estadoPago||'').toUpperCase();if(solicitado==='PENDIENTE'&&cob===0)estado='PENDIENTE';if(solicitado==='PARCIAL'&&cob>0&&saldo>0.01)estado='PARCIAL';if(entrega==='NO ENTREGADO')estado='NO APLICA';
@@ -1690,7 +1691,7 @@ function guardarCobranzaPedido(p){
   // La promesa de pago solo es obligatoria cuando el pedido fue entregado.
   if(p.fechaPromesa){const inicio=crearFecha(p.fechaEntrega||hoyClave_()),limite=new Date(inicio);limite.setDate(limite.getDate()+3);if(crearFecha(p.fechaPromesa)>limite)return 'El compromiso no puede superar tres días desde la entrega.';}
   const sh=ss().getSheetByName(HOJA_COBRANZA),map=cobranzaMap_(),row=[map[p.ventaId]?.id||('COB-'+Utilities.getUuid().slice(0,8).toUpperCase()),p.ventaId,crearFecha(p.fechaEntrega||hoyClave_()),p.cliente||'',total,entrega,estado,ef,ya,pl,tr,pos,ot,cob,saldo,p.fechaPromesa?crearFecha(p.fechaPromesa):'',p.medioPrometido||'',p.observacion||'',usuarioSistema_(),'PENDIENTE',new Date()];
-  if(map[p.ventaId])sh.getRange(map[p.ventaId].fila,1,1,row.length).setValues([row]);else sh.appendRow(row);actualizarCxC_(Object.assign({},p,{totalCobrado:cob,estadoCobro:estado}));return 'Cobranza registrada correctamente. Pendiente de rendición administrativa.';
+  if(map[p.ventaId])sh.getRange(map[p.ventaId].fila,1,1,row.length).setValues([row]);else sh.appendRow(row);actualizarCxC_(Object.assign({},p,{totalCobrado:cob,estadoCobro:estado}));if(cacheKey)cache.put(cacheKey,String(p.ventaId),21600);return 'Cobranza registrada correctamente. Pendiente de rendición administrativa.';
 }
 function subirComprobanteGasto(nombre,mime,base64){requerirPerfil(['MASTER','PREVENTA']);asegurarCobranza_();if(!base64)return '';const bytes=Utilities.base64Decode(String(base64).split(',').pop()),blob=Utilities.newBlob(bytes,mime||'image/jpeg',nombre||('comprobante-'+Date.now()+'.jpg'));let folder;const it=DriveApp.getFoldersByName('QASO_Comprobantes');folder=it.hasNext()?it.next():DriveApp.createFolder('QASO_Comprobantes');const f=folder.createFile(blob);return f.getUrl();}
 function registrarGastoOperacion(p){
