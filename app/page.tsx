@@ -37,6 +37,7 @@ type Client = {
     fechaCumpleanos: string;
     direccion: string;
     comentarios?: string;
+    estado?: string;
 };
 type SaleItem = {
     codigo: string;
@@ -70,6 +71,7 @@ type Order = {
         subtotal: number;
     }>;
     estadoEntrega?: string;
+    estadoOperativo?: string;
     fechaEntrega?: string;
     estadoCobro?: string;
     totalCobrado?: number;
@@ -104,6 +106,8 @@ type CurveData = { labels?: string[]; planeado?: number[]; real?: number[]; resu
 type RenditionData = { fecha: string; fuente?: string; pedidosPendientes?: number; declarado: { efectivo?: number; yape?: number; otros?: number; gastosEfectivo?: number; gastosVirtuales?: number; efectivoEsperado?: number; pendiente?: number }; validacion: null | { efectivoRecibido?: number; yapeVerificado?: number; otrosVerificado?: number; observacion?: string } };
 type JourneySummary = { fecha: string; jornada?: { id?: string; estado?: string; repartidor?: string; vehiculo?: string; ruta?: string }; pedidosAsignados: number; entregados: number; noEntregados: number; ventasEntregadas: number; totalCobrado: number; saldoPendiente: number; cobros: { total: number; efectivo: number; yape: number; plin: number; transferencia: number; otros: number }; saldos: { dentroPlazo: number; urgente: number }; noEntregadosDetalle?: { pendientes: number; clienteAusente: number; reprogramados: number; rechazados: number; observados?: number }; gastos: { total: number; pendientes: number; aprobados: number; porCategoria: Record<string, number> }; efectivoEsperado: number };
 type ExpenseApproval = { solicitudId: string; fecha: string; partida: string; descripcion: string; importe: number; canal: string; usuario: string; estadoAprobacion?: string; observacion?: string; origenDinero?: string; proveedor?: string };
+type ActivityRecord = { id: string; fecha: string; fechaOrden: number; tipo: string; ventaId: string; cliente: string; descripcion: string; monto: number; usuario: string };
+type PreparationLine = { ventaId: string; codigo: string; producto: string; cantidadPedido: number; presentacion?: string; unidadesBase: number; cantidadPreparada: number; estadoLinea: "PENDIENTE" | "PREPARADO" | "FALTANTE" | "OBSERVADO"; cantidadFaltante: number; motivo: string; observacion: string; estadoStock: string; stockFisico: number; stockReservado: number; stockDisponible: number };
 type AnalysisSeries = { codigo: string; nombre: string; slot: number; meses: number[]; total: number };
 type AnalysisGroup = { nombre: string; cantidad: number };
 type AnalysisDashboard = { meses: string[]; opciones: Array<{ codigo: string; nombre: string }>; seleccion: string[]; series: AnalysisSeries[]; distribucion: AnalysisGroup[]; totalProductos: number; totalVentas: number };
@@ -190,7 +194,7 @@ const normalizeOperationalState = (value: unknown) => {
     if (state === "OBSERVADO") return "OBSERVADO";
     return "POR_COMPRAR";
 };
-const dedupeOrders = (rows: Order[] = []) => [...new Map(rows.filter(row => row?.ventaId).map(row => [String(row.ventaId), { ...row, estadoEntrega: normalizeOperationalState(row.estadoEntrega) }])).values()];
+const dedupeOrders = (rows: Order[] = []) => [...new Map(rows.filter(row => row?.ventaId).map(row => [String(row.ventaId), { ...row, estadoOperativo: normalizeOperationalState(row.estadoOperativo || row.estadoEntrega) }])).values()];
 const cacheGet = <T,>(key: string, fallback: T): T => {
     try {
         return JSON.parse(localStorage.getItem(key) || "") as T;
@@ -213,7 +217,7 @@ const collectionRendition = (rows: Order[]) => {
         validacion: null,
     };
 };
-const READ_ONLY = new Set(["obtenerSesion", "obtenerResumen", "obtenerCatalogoProductos", "obtenerClientes", "obtenerClientesPreventa", "obtenerStock", "obtenerEmisiones", "obtenerCobranzaPedidos", "obtenerGastosOperacion", "obtenerRendicionDia", "obtenerMovimientosIngreso", "obtenerHistorial", "obtenerCentroGerencial", "obtenerPlaneamientoMensual", "obtenerContabilidadDiaria", "obtenerCurvaS", "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "obtenerListas"]);
+const READ_ONLY = new Set(["obtenerSesion", "obtenerResumen", "obtenerCatalogoProductos", "obtenerClientes", "obtenerClientesPreventa", "obtenerStock", "obtenerEmisiones", "obtenerCobranzaPedidos", "obtenerGastosOperacion", "obtenerRendicionDia", "obtenerMovimientosIngreso", "obtenerHistorial", "obtenerCentroGerencial", "obtenerPlaneamientoMensual", "obtenerContabilidadDiaria", "obtenerCurvaS", "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "obtenerListas", "obtenerPreparacionPedido", "obtenerActividadReciente"]);
 async function measured<T>(label: string, action: () => Promise<T>): Promise<T> { const started = performance.now(); try { return await action(); } finally { if (process.env.NODE_ENV !== "production") console.info(`[PERF] ${label}: ${Math.round(performance.now() - started)}ms`); } }
 async function api<T>(fn: string, args: unknown[] = [], token = ""): Promise<T> {
     const response = await fetch("/api/qaso", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fn, args, token }) });
@@ -264,6 +268,7 @@ export default function Home() {
     const [clients, setClients] = useState<Client[]>([]);
     const [orders, setOrders] = useState<Order[]>([]);
     const [collectionRows, setCollectionRows] = useState<Order[]>([]);
+    const [activities, setActivities] = useState<ActivityRecord[]>([]);
     const [summary, setSummary] = useState<Summary | null>(null);
     const [loading, setLoading] = useState(false);
     const [collectionsLoading, setCollectionsLoading] = useState(false);
@@ -273,7 +278,9 @@ export default function Home() {
         if (visible)
             setPending(n => n + 1);
         try {
-            return await api<T>(fn, args, session?.token || "");
+            const result = await api<T>(fn, args, session?.token || "");
+            if (visible) window.dispatchEvent(new CustomEvent("nexo:activity"));
+            return result;
         }
         catch (error) {
             const message = error instanceof Error ? error.message : "No se pudo consultar Google Sheets.";
@@ -296,6 +303,12 @@ export default function Home() {
         setClients(c || []);
         cacheSet("nexo_clients", c || []);
     }, [call, session]);
+    const refreshActivity = useCallback(async () => {
+        if (!session || !navigator.onLine) return;
+        try { const next = await call<ActivityRecord[]>("obtenerActividadReciente", [15]); setActivities(next || []); cacheSet("nexo_activities", next || []); }
+        catch { setActivities(cacheGet<ActivityRecord[]>("nexo_activities", [])); }
+    }, [call, session]);
+    useEffect(() => { const update = () => window.setTimeout(() => void refreshActivity(), 250); window.addEventListener("nexo:activity", update); return () => window.removeEventListener("nexo:activity", update); }, [refreshActivity]);
     const refreshProducts = useCallback(async () => {
         if (!session || !navigator.onLine)
             return;
@@ -432,13 +445,13 @@ export default function Home() {
             return;
         queueMicrotask(() => {
             setProducts(cacheGet("nexo_products", [])); setClients(cacheGet("nexo_clients", [])); setOrders(dedupeOrders(cacheGet("nexo_orders", [])));
-            setCollectionRows(cacheGet("nexo_collections", [])); setSummary(cacheGet("nexo_summary", null));
+            setCollectionRows(cacheGet("nexo_collections", [])); setActivities(cacheGet("nexo_activities", [])); setSummary(cacheGet("nexo_summary", null));
         });
     }, [session]);
     useEffect(() => {
         if (session && active === "Inicio")
-            queueMicrotask(() => void refreshCollections());
-    }, [active, refreshCollections, session]);
+            queueMicrotask(() => { void refreshCollections(); void refreshActivity(); });
+    }, [active, refreshActivity, refreshCollections, session]);
     useEffect(() => {
         if (session)
             queueMicrotask(() => void refresh().then(syncQueue));
@@ -471,7 +484,7 @@ export default function Home() {
     const navigate = (label: string) => { setActive(label); setMobileMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); };
     const primaryMobile = (session.perfil === "PREVENTA" ? ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"] : ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"]).filter(allowed);
     const secondaryMobile = menu.filter(label => allowed(label) && !primaryMobile.includes(label));
-    return <main className={`app-shell role-${session.perfil.toLowerCase()} ${pending ? "is-processing" : ""}`}><aside className="sidebar"><div className="brand"><span className="brand-mark">N</span><div><strong>NexoVenta</strong><small>Google Sheets conectado</small></div></div><nav>{menu.filter(allowed).map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span>{label}</button>)}</nav><div className="profile"><span>{session.nombre.slice(0, 2).toUpperCase()}</span><div><b>{session.nombre}</b><small>{session.perfil}</small></div><button onClick={logout} title="Cerrar sesión">↪</button></div></aside><section className="workspace"><header className="topbar"><div><small>{new Date().toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long" })}</small><h1>{active}</h1></div><div className="top-actions"><span className={`sync-pill ${online ? "" : "offline"}`}>● {online ? (pending ? "Procesando solicitud…" : loading ? "Actualizando…" : "En línea · Sheets") : "Sin señal · modo local"}</span><button onClick={refresh} disabled={pending > 0}>↻ Actualizar</button></div></header><div className="content">{active === "Inicio" && <Dashboard summary={summary} orders={orders} clients={clients} receivables={collectionRows} onNavigate={navigate} session={session}/>}{active === "Clientes" && <Clients clients={clients} call={call} refresh={refresh} notify={notify} online={online}/>}{active === "Preventa" && <Sales products={products} clients={clients} call={call} refreshProducts={refreshProducts} notify={notify} online={online}/>}{active === "Pedidos y emisión" && <Orders orders={orders} call={call} refresh={refresh} notify={notify} onOrderUpdated={updated => setOrders(rows => dedupeOrders(rows.map(row => row.ventaId === updated.ventaId ? updated : row)))}/>}{active === "Cobranza y rendición" && <Collections rows={collectionRows} clients={clients} loading={collectionsLoading} load={refreshCollections} call={call} notify={notify}/>}{active === "Productos e inventario" && <Inventory products={products} call={call} refresh={refresh} notify={notify} master={session.perfil === "MASTER"}/>}{active === "Gestión financiera" && <Finance call={call} notify={notify}/>}{active === "Reportes" && <Reports call={call} notify={notify}/>}{active === "Análisis" && <Analytics call={call} notify={notify}/>}{active === "Configuración" && <Settings call={call} notify={notify} session={session}/>}</div></section><nav className="mobile-nav" aria-label="Navegación principal">{primaryMobile.map(label => <button key={label} className={`${active === label ? "active" : ""} ${label === "Preventa" ? "sale" : ""}`} onClick={() => navigate(label)} aria-label={label}><span>{icons[label]}</span><small>{label === "Pedidos y emisión" ? "Pedidos" : label}</small></button>)}<button className={secondaryMobile.includes(active) || mobileMenuOpen ? "active" : ""} onClick={() => setMobileMenuOpen(v => !v)} aria-label="Abrir más opciones" aria-expanded={mobileMenuOpen}><span>☰</span><small>Más</small></button></nav>{mobileMenuOpen && <div className="mobile-more-backdrop" onClick={() => setMobileMenuOpen(false)}><section className="mobile-more" onClick={e => e.stopPropagation()}><div className="mobile-more-head"><div><strong>Menú de NexoVenta</strong><small>{session.nombre} · {session.perfil}</small></div><button onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menú">×</button></div><div className="mobile-more-grid">{secondaryMobile.map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span><b>{label}</b></button>)}</div><button className="mobile-logout" onClick={logout}>↪ Cerrar sesión</button></section></div>}{pending > 0 && <div className="processing-banner"><i></i><span><b>Procesando solicitud</b><small>No cierres la ventana ni vuelvas a presionar el botón.</small></span></div>}{toast && <div className="toast">{toast}</div>}</main>;
+    return <main className={`app-shell role-${session.perfil.toLowerCase()} ${pending ? "is-processing" : ""}`}><aside className="sidebar"><div className="brand"><span className="brand-mark">N</span><div><strong>NexoVenta</strong><small>Google Sheets conectado</small></div></div><nav>{menu.filter(allowed).map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span>{label}</button>)}</nav><div className="profile"><span>{session.nombre.slice(0, 2).toUpperCase()}</span><div><b>{session.nombre}</b><small>{session.perfil}</small></div><button onClick={logout} title="Cerrar sesión">↪</button></div></aside><section className="workspace"><header className="topbar"><div><small>{new Date().toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long" })}</small><h1>{active}</h1></div><div className="top-actions"><span className={`sync-pill ${online ? "" : "offline"}`}>● {online ? (pending ? "Procesando solicitud…" : loading ? "Actualizando…" : "En línea · Sheets") : "Sin señal · modo local"}</span><button onClick={refresh} disabled={pending > 0}>↻ Actualizar</button></div></header><div className="content">{active === "Inicio" && <Dashboard summary={summary} orders={orders} clients={clients} receivables={collectionRows} activities={activities} onNavigate={navigate} session={session}/>}{active === "Clientes" && <Clients clients={clients} call={call} refresh={refresh} notify={notify} online={online}/>}{active === "Preventa" && <Sales products={products} clients={clients} call={call} refreshProducts={refreshProducts} notify={notify} online={online}/>}{active === "Pedidos y emisión" && <Orders orders={orders} call={call} refresh={refresh} notify={notify} onOrderUpdated={updated => setOrders(rows => dedupeOrders(rows.map(row => row.ventaId === updated.ventaId ? updated : row)))}/>}{active === "Cobranza y rendición" && <Collections rows={collectionRows} clients={clients} loading={collectionsLoading} load={refreshCollections} call={call} notify={notify}/>}{active === "Productos e inventario" && <Inventory products={products} call={call} refresh={refresh} notify={notify} master={session.perfil === "MASTER"}/>}{active === "Gestión financiera" && <Finance call={call} notify={notify}/>}{active === "Reportes" && <Reports call={call} notify={notify}/>}{active === "Análisis" && <Analytics call={call} notify={notify}/>}{active === "Configuración" && <Settings call={call} notify={notify} session={session}/>}</div></section><nav className="mobile-nav" aria-label="Navegación principal">{primaryMobile.map(label => <button key={label} className={`${active === label ? "active" : ""} ${label === "Preventa" ? "sale" : ""}`} onClick={() => navigate(label)} aria-label={label}><span>{icons[label]}</span><small>{label === "Pedidos y emisión" ? "Pedidos" : label}</small></button>)}<button className={secondaryMobile.includes(active) || mobileMenuOpen ? "active" : ""} onClick={() => setMobileMenuOpen(v => !v)} aria-label="Abrir más opciones" aria-expanded={mobileMenuOpen}><span>☰</span><small>Más</small></button></nav>{mobileMenuOpen && <div className="mobile-more-backdrop" onClick={() => setMobileMenuOpen(false)}><section className="mobile-more" onClick={e => e.stopPropagation()}><div className="mobile-more-head"><div><strong>Menú de NexoVenta</strong><small>{session.nombre} · {session.perfil}</small></div><button onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menú">×</button></div><div className="mobile-more-grid">{secondaryMobile.map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span><b>{label}</b></button>)}</div><button className="mobile-logout" onClick={logout}>↪ Cerrar sesión</button></section></div>}{pending > 0 && <div className="processing-banner"><i></i><span><b>Procesando solicitud</b><small>No cierres la ventana ni vuelvas a presionar el botón.</small></span></div>}{toast && <div className="toast">{toast}</div>}</main>;
 }
 function Heading({ eyebrow, title, text, children }: {
     eyebrow: string;
@@ -479,11 +492,12 @@ function Heading({ eyebrow, title, text, children }: {
     text: string;
     children?: React.ReactNode;
 }) { return <section className="section-heading"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2><p>{text}</p></div>{children}</section>; }
-function Dashboard({ summary, orders, clients, receivables, onNavigate, session }: {
+function Dashboard({ summary, orders, clients, receivables, activities, onNavigate, session }: {
     summary: Summary | null;
     orders: Order[];
     clients: Client[];
     receivables: Order[];
+    activities: ActivityRecord[];
     onNavigate: (s: string) => void;
     session: Session;
 }) {
@@ -500,8 +514,9 @@ function Dashboard({ summary, orders, clients, receivables, onNavigate, session 
     const ticketAverage = monthOrders.length ? salesMonth / monthOrders.length : 0;
     const [monthlyGoal, setMonthlyGoal] = useState(() => cacheGet<number>("nexo_monthly_goal", 20000));
     const goalProgress = monthlyGoal > 0 ? Math.min(100, (salesMonth / monthlyGoal) * 100) : 0;
-    const birthdays = clients.filter(c => birthdayDays(c.fechaCumpleanos) <= 7).sort((a, b) => birthdayDays(a.fechaCumpleanos) - birthdayDays(b.fechaCumpleanos));
-    const birthdayCount = Math.max(birthdays.length, Number(summary?.cumpleanos || 0));
+    const [birthdayOpen, setBirthdayOpen] = useState(false);
+    const birthdays = clients.filter(c => String(c.estado || "ACTIVO").toUpperCase() !== "INACTIVO" && Boolean(c.fechaCumpleanos) && birthdayDays(c.fechaCumpleanos) >= 0 && birthdayDays(c.fechaCumpleanos) <= 20).sort((a, b) => birthdayDays(a.fechaCumpleanos) - birthdayDays(b.fechaCumpleanos));
+    const birthdayCount = birthdays.length;
     const todayCount = birthdays.filter(c => birthdayDays(c.fechaCumpleanos) === 0).length;
     const debts = receivables.filter(o => String(o.estadoEntrega).toUpperCase() === "ENTREGADO" && Number(o.saldo || 0) > .01).sort((a, b) => daysSince(b.fechaEntrega || b.fecha) - daysSince(a.fechaEntrega || a.fecha));
     const urgent = debts.filter(o => daysSince(o.fechaEntrega || o.fecha) >= 4);
@@ -531,9 +546,10 @@ function Dashboard({ summary, orders, clients, receivables, onNavigate, session 
             <article><span>Ticket promedio</span><strong>{money(ticketAverage)}</strong><small>{monthOrders.length} ventas este mes</small></article>
             <article className="inactive-card"><span>Clientes inactivos</span><strong>{inactiveClients.length}</strong><small>Sin compra en 30 días</small></article>
         </section>
-        <div className="home-alerts"><button className={`birthday-alert ${birthdayCount ? "" : "birthday-empty"}`} onClick={() => onNavigate("Clientes")}><span className="birthday-cake">🎂</span><div><small>{todayCount ? "¡CUMPLEAÑOS DE HOY!" : "CUMPLEAÑOS PENDIENTES"}</small><strong>{birthdayCount}</strong><p>{birthdays.length ? birthdays.slice(0, 3).map(c => `${c.nombre} ${c.apellidos}`.trim()).join(", ") : "0 cumpleaños próximos · Toca para revisar clientes"}</p></div></button>{pendingDebt.length > 0 && <button className="receivable-alert pending" onClick={() => { cacheSet("nexo_route_tab", "PENDIENTES DE COBRO"); onNavigate("Cobranza y rendición"); }}><span>◷</span><div><small>COBRANZA PENDIENTE</small><strong>{money(pendingDebtTotal)}</strong><p>{pendingDebt.length} pedido(s) · Hoy {money(dueToday)} · Mañana {money(dueTomorrow)}</p></div></button>}{urgent.length > 0 && <button className="receivable-alert urgent" onClick={() => { cacheSet("nexo_route_tab", "COBRANZA URGENTE"); onNavigate("Cobranza y rendición"); }}><span>⚠</span><div><small>COBRANZA URGENTE</small><strong>{money(urgentDebtTotal)}</strong><p>{urgent.length} pedido(s) vencido(s) · Mayor atraso {Math.max(...urgent.map(o => daysSince(o.fechaEntrega || o.fecha) - 3))} día(s)</p></div></button>}</div>
+        <div className="home-alerts"><button className={`birthday-alert ${birthdayCount ? "" : "birthday-empty"}`} onClick={() => setBirthdayOpen(true)}><span className="birthday-cake">🎂</span><div><small>{todayCount ? "¡CUMPLEAÑOS DE HOY!" : "CUMPLEAÑOS PRÓXIMOS"}</small><strong>{birthdayCount}</strong><p>{birthdays.length ? birthdays.slice(0, 3).map(c => `${c.nombre} ${c.apellidos}`.trim()).join(", ") : "0 cumpleaños próximos"}</p></div></button>{pendingDebt.length > 0 && <button className="receivable-alert pending" onClick={() => { cacheSet("nexo_route_tab", "PENDIENTES DE COBRO"); onNavigate("Cobranza y rendición"); }}><span>◷</span><div><small>COBRANZA PENDIENTE</small><strong>{money(pendingDebtTotal)}</strong><p>{pendingDebt.length} pedido(s) · Hoy {money(dueToday)} · Mañana {money(dueTomorrow)}</p></div></button>}{urgent.length > 0 && <button className="receivable-alert urgent" onClick={() => { cacheSet("nexo_route_tab", "COBRANZA URGENTE"); onNavigate("Cobranza y rendición"); }}><span>⚠</span><div><small>COBRANZA URGENTE</small><strong>{money(urgentDebtTotal)}</strong><p>{urgent.length} pedido(s) vencido(s) · Mayor atraso {Math.max(...urgent.map(o => daysSince(o.fechaEntrega || o.fecha) - 3))} día(s)</p></div></button>}</div>
         {!isPreventa && <section className="manager-secondary-metrics"><article><p>Clientes registrados</p><strong>{summary?.totalClientes || clients.length}</strong><small>{inactiveClients.length} requieren seguimiento</small></article><article><p>Productos</p><strong>{summary?.totalProductos || 0}</strong><small>{summary?.stockBajo || 0} con stock bajo</small></article><article><p>Valor de inventario</p><strong>{money(summary?.valorTotalInventario)}</strong><small>{summary?.sinStock || 0} sin stock</small></article></section>}
-        <section className="panel data-panel"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Últimos pedidos registrados</p></div></div><SimpleOrders rows={orders.slice(0, isPreventa ? 5 : 8)}/></section>
+        <section className="panel recent-activity"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Actividad transversal del ERP en tiempo real</p></div></div><div>{activities.slice(0, 15).map(item => <article key={item.id}><time>{new Date(item.fecha).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</time><span><b>{item.tipo}</b><small>{item.cliente || item.ventaId || item.descripcion}</small></span>{item.monto > 0 && <strong>{money(item.monto)}</strong>}</article>)}{!activities.length && <p className="empty-activity">Aún no existen operaciones registradas en el historial transversal.</p>}</div></section>
+        {birthdayOpen && <div className="modal-bg" onMouseDown={event => { if (event.target === event.currentTarget) setBirthdayOpen(false); }}><section className="birthday-list-modal" role="dialog" aria-modal="true" aria-label="Cumpleaños próximos" onMouseDown={event => event.stopPropagation()}><header><div><small>PRÓXIMOS 20 DÍAS</small><h2>Cumpleaños próximos</h2></div><button onClick={() => setBirthdayOpen(false)}>×</button></header><div>{birthdays.map(client => <article key={client.id}><span><b>{client.nombre} {client.apellidos}</b><small>{client.contacto || "Sin teléfono"}</small></span><strong>{birthdayDays(client.fechaCumpleanos) === 0 ? "Hoy" : `En ${birthdayDays(client.fechaCumpleanos)} día(s)`}</strong></article>)}{!birthdays.length && <p>0 cumpleaños próximos.</p>}</div></section></div>}
     </div>;
 }
 function Clients({ clients, call, refresh, notify, online }: {
@@ -767,19 +783,46 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     const [clientFilter, setClientFilter] = useState("TODOS");
     const [editing, setEditing] = useState(false);
     const [savingEdit, setSavingEdit] = useState(false);
+    const [preparation, setPreparation] = useState<PreparationLine[]>([]);
+    const [savingPreparation, setSavingPreparation] = useState(false);
+    const [assignmentOpen, setAssignmentOpen] = useState(false);
+    const [assignment, setAssignment] = useState({ fecha: today(), repartidor: "", vehiculo: "", ruta: "", ordenVisita: 1 });
     const [editClient, setEditClient] = useState("");
     const [editObs, setEditObs] = useState("");
     const [editItems, setEditItems] = useState<Array<{ codigo: string; nombre: string; cantidad: number; precioUnitario: number }>>([]);
     const states = ["POR_COMPRAR", "LISTO_PARA_ENTREGA", "ENTREGADO", "OBSERVADO"];
     const uniqueOrders = useMemo(() => dedupeOrders(orders), [orders]);
-    const stateOf = (o: Order) => normalizeOperationalState(o.estadoEntrega);
+    const stateOf = (o: Order) => normalizeOperationalState(o.estadoOperativo || o.estadoEntrega);
     const counts = Object.fromEntries(states.map(state => [state, uniqueOrders.filter(o => stateOf(o) === state).length]));
     const emittedCount = uniqueOrders.filter(o => Boolean(o.codigoImpresion)).length;
     const orderClients = [...new Set(uniqueOrders.map(o => o.cliente).filter(Boolean))].sort();
     const visible = uniqueOrders.filter(o => stateOf(o) === orderTab && (emissionFilter === "TODAS" || (emissionFilter === "EMITIDA" ? Boolean(o.codigoImpresion) : !o.codigoImpresion)) && (clientFilter === "TODOS" || o.cliente === clientFilter) && JSON.stringify(o).toLowerCase().includes(query.toLowerCase()));
     function openDetail(order: Order) {
         returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        setDetail(order);
+        setDetail({ ...order, estadoEntrega: order.estadoOperativo || order.estadoEntrega });
+        setPreparation([]);
+        void call<{ lineas: PreparationLine[] }>("obtenerPreparacionPedido", [order.ventaId]).then(result => setPreparation(result.lineas || [])).catch(() => setPreparation([]));
+    }
+    function updatePreparation(index: number, patch: Partial<PreparationLine>) { setPreparation(lines => lines.map((line, current) => current === index ? { ...line, ...patch } : line)); }
+    async function savePreparation(markReady = false) {
+        if (!detail || savingPreparation) return;
+        setSavingPreparation(true);
+        try {
+            const result = await call<{ ok: boolean; mensaje: string }>("guardarPreparacionPedido", [{ ventaId: detail.ventaId, lineas: preparation, marcarListo: markReady }]);
+            notify(result.mensaje);
+            if (result.ok && markReady) { onOrderUpdated({ ...detail, estadoOperativo: "LISTO_PARA_ENTREGA" }); setDetail(null); }
+        }
+        catch (error) { notify(error instanceof Error ? error.message : "No se guardó la preparación"); }
+        finally { setSavingPreparation(false); }
+    }
+    async function assignJourney(e: FormEvent) {
+        e.preventDefault(); if (!detail) return;
+        try {
+            const result = await call<{ ok: boolean; mensaje: string }>("asignarPedidoJornada", [{ ventaId: detail.ventaId, ...assignment }]);
+            notify(result.mensaje);
+            if (result.ok) { setAssignmentOpen(false); onOrderUpdated({ ...detail, estadoOperativo: "LISTO_PARA_ENTREGA", estadoEntrega: "EN_RUTA" }); setDetail(null); }
+        }
+        catch (error) { notify(error instanceof Error ? error.message : "No se asignó la jornada"); }
     }
     function closeDetail() {
         if (editing && !window.confirm("Hay cambios sin guardar. ¿Deseas salir?"))
@@ -826,7 +869,7 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
                     throw new Error("Actualiza Apps Script antes de cambiar el estado de un pedido que ya tiene cobros.");
                 message = await call<string>("guardarCobranzaPedido", [{ ventaId: o.ventaId, cliente: o.cliente, totalPedido: 0, estadoEntrega: backendState, estadoPago: "PENDIENTE", efectivo: 0, yape: 0, plin: 0, transferencia: 0, pos: 0, otros: 0, observacion: "ESTADO OPERATIVO" }]);
             }
-            onOrderUpdated({ ...o, estadoEntrega: normalized });
+            onOrderUpdated({ ...o, estadoOperativo: normalized });
             notify(message || `Estado actualizado: ${backendState}`);
             setDetail(null);
         }
@@ -863,7 +906,7 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     }
     function startEdit(o: Order) { setEditClient(o.cliente); setEditObs(o.observaciones || ""); setEditItems(o.items.map(i => ({ codigo: i.codigo, nombre: i.nombre, cantidad: Number(i.cantidad), precioUnitario: Number(i.precioUnitario) }))); setEditing(true); }
     async function saveEdit() { if (!detail || savingEdit) return; if (!editClient.trim() || !editItems.length || editItems.some(i => !(i.cantidad > 0))) return notify("Revisa el cliente y las cantidades del pedido."); setSavingEdit(true); try { const result = await call<{ ok: boolean; mensaje: string; total?: number }>("corregirPedido", [{ ventaId: detail.ventaId, cliente: editClient.trim(), observaciones: editObs, items: editItems.map(i => ({ codigo: i.codigo, cantidad: i.cantidad })) }]); if (!result.ok) throw new Error(result.mensaje); notify(result.mensaje); setEditing(false); setDetail(null); await refresh(); } catch (x) { notify(x instanceof Error ? x.message : "No se pudo editar el pedido"); } finally { setSavingEdit(false); } }
-    return <div className="orders-page"><Heading eyebrow="OPERACIÓN Y DESPACHO" title="Pedidos y emisión" text="Controla la compra, preparación y emisión de cada pedido."/><nav className="order-state-tabs">{states.map(state => <button key={state} className={orderTab === state ? "active" : ""} onClick={() => setOrderTab(state)}><span>{state.replace(/_/g, " ")}</span><b>{counts[state]}</b></button>)}</nav><nav className="order-secondary-filters"><button className={emissionFilter === "EMITIDA" ? "active" : ""} onClick={() => setEmissionFilter(value => value === "EMITIDA" ? "TODAS" : "EMITIDA")}>Boletas emitidas <b>{emittedCount}</b></button><button className={emissionFilter === "NO_EMITIDA" ? "active" : ""} onClick={() => setEmissionFilter(value => value === "NO_EMITIDA" ? "TODAS" : "NO_EMITIDA")}>Boletas no emitidas <b>{uniqueOrders.length - emittedCount}</b></button><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos los clientes</option>{orderClients.map(client => <option key={client}>{client}</option>)}</select></label><button onClick={() => { setEmissionFilter("TODAS"); setClientFilter("TODOS"); setQuery(""); }}>Limpiar filtros</button></nav><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar pedido…"/></label></section><section className="panel data-panel"><SimpleOrders rows={visible} onDetail={openDetail}/></section>{detail && <div className="modal-bg order-dialog-bg" onMouseDown={e => { if (e.target === e.currentTarget) closeDetail(); }}><section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Detalle del pedido ${detail.ventaId}`} className="order-detail order-dialog" onMouseDown={e => e.stopPropagation()}><button className="close" onClick={closeDetail} aria-label="Cerrar detalle">×</button><h2>{detail.ventaId}</h2>{editing ? <div className="order-editor"><label>Cliente<input value={editClient} onChange={e => setEditClient(e.target.value)}/></label><label>Observaciones<textarea value={editObs} onChange={e => setEditObs(e.target.value)}/></label><h3>Materiales y cantidades</h3>{editItems.map((i, index) => <div className="order-edit-item" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo} · {money(i.precioUnitario)}</small></span><input aria-label={`Cantidad de ${i.nombre}`} type="number" min="0.01" step="0.01" value={i.cantidad} onChange={e => setEditItems(rows => rows.map((row, n) => n === index ? { ...row, cantidad: Number(e.target.value) } : row))}/><button onClick={() => setEditItems(rows => rows.filter((_, n) => n !== index))}>×</button></div>)}<div className="detail-total"><span>Nuevo total</span><strong>{money(editItems.reduce((sum, i) => sum + i.cantidad * i.precioUnitario, 0))}</strong></div><div className="order-actions"><button onClick={() => setEditing(false)}>Cancelar</button><button className="primary" disabled={savingEdit} onClick={saveEdit}>{savingEdit ? "Guardando…" : "Guardar cambios"}</button></div></div> : <><p>{detail.cliente} · {detail.fecha}</p><label>Estado operativo<select value={normalizeOperationalState(detail.estadoEntrega)} onChange={e => status(detail, e.target.value)}>{states.map(s => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}</select></label><div className={`emission-summary ${detail.codigoImpresion ? "emitted" : ""}`}><b>{detail.codigoImpresion ? "✓ Boleta emitida" : "Boleta no emitida"}</b>{detail.codigoImpresion && <small>{detail.codigoImpresion} · {detail.fechaImpresion}</small>}</div><h3>Materiales asociados</h3><div className="detail-items">{detail.items.map(i => <div className="detail-row" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo}</small></span><span>{i.cantidad}</span><span>{money(i.precioUnitario)}</span><span><b>{money(i.subtotal)}</b></span></div>)}</div><div className="detail-total"><span>Total</span><strong>{money(detail.total)}</strong></div><div className="order-actions"><button onClick={() => startEdit(detail)}>✎ Editar pedido</button><button disabled={printing} onClick={() => printOrder(detail)}>{printing ? printStage : detail.codigoImpresion ? "Reimprimir boleta" : "Emitir e imprimir boleta"}</button></div></>}</section></div>}</div>;
+    return <div className="orders-page"><Heading eyebrow="OPERACIÓN Y DESPACHO" title="Pedidos y emisión" text="Controla la compra, preparación y emisión de cada pedido."/><nav className="order-state-tabs">{states.map(state => <button key={state} className={orderTab === state ? "active" : ""} onClick={() => setOrderTab(state)}><span>{state.replace(/_/g, " ")}</span><b>{counts[state]}</b></button>)}</nav><nav className="order-secondary-filters"><button className={emissionFilter === "EMITIDA" ? "active" : ""} onClick={() => setEmissionFilter(value => value === "EMITIDA" ? "TODAS" : "EMITIDA")}>Boletas emitidas <b>{emittedCount}</b></button><button className={emissionFilter === "NO_EMITIDA" ? "active" : ""} onClick={() => setEmissionFilter(value => value === "NO_EMITIDA" ? "TODAS" : "NO_EMITIDA")}>Boletas no emitidas <b>{uniqueOrders.length - emittedCount}</b></button><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos los clientes</option>{orderClients.map(client => <option key={client}>{client}</option>)}</select></label><button onClick={() => { setEmissionFilter("TODAS"); setClientFilter("TODOS"); setQuery(""); }}>Limpiar filtros</button></nav><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar pedido…"/></label></section><section className="panel data-panel"><SimpleOrders rows={visible} onDetail={openDetail}/></section>{detail && <div className="modal-bg order-dialog-bg" onMouseDown={e => { if (e.target === e.currentTarget) closeDetail(); }}><section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Detalle del pedido ${detail.ventaId}`} className="order-detail order-dialog" onMouseDown={e => e.stopPropagation()}><button className="close" onClick={closeDetail} aria-label="Cerrar detalle">×</button><h2>{detail.ventaId}</h2>{editing ? <div className="order-editor"><label>Cliente<input value={editClient} onChange={e => setEditClient(e.target.value)}/></label><label>Observaciones<textarea value={editObs} onChange={e => setEditObs(e.target.value)}/></label><h3>Materiales y cantidades</h3>{editItems.map((i, index) => <div className="order-edit-item" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo} · {money(i.precioUnitario)}</small></span><input aria-label={`Cantidad de ${i.nombre}`} type="number" min="0.01" step="0.01" value={i.cantidad} onChange={e => setEditItems(rows => rows.map((row, n) => n === index ? { ...row, cantidad: Number(e.target.value) } : row))}/><button onClick={() => setEditItems(rows => rows.filter((_, n) => n !== index))}>×</button></div>)}<div className="detail-total"><span>Nuevo total</span><strong>{money(editItems.reduce((sum, i) => sum + i.cantidad * i.precioUnitario, 0))}</strong></div><div className="order-actions"><button onClick={() => setEditing(false)}>Cancelar</button><button className="primary" disabled={savingEdit} onClick={saveEdit}>{savingEdit ? "Guardando…" : "Guardar cambios"}</button></div></div> : <><p>{detail.cliente} · {detail.fecha}</p><label>Estado operativo<select value={normalizeOperationalState(detail.estadoEntrega)} onChange={e => status(detail, e.target.value)}>{states.map(s => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}</select></label><div className={`emission-summary ${detail.codigoImpresion ? "emitted" : ""}`}><b>{detail.codigoImpresion ? "✓ Boleta emitida" : "Boleta no emitida"}</b>{detail.codigoImpresion && <small>{detail.codigoImpresion} · {detail.fechaImpresion}</small>}</div><div className="order-progress"><span className="done">Pedido creado ✓</span><span className={normalizeOperationalState(detail.estadoEntrega) !== "POR_COMPRAR" ? "done" : ""}>Preparación {normalizeOperationalState(detail.estadoEntrega) !== "POR_COMPRAR" ? "✓" : "○"}</span><span className={["LISTO_PARA_ENTREGA","ENTREGADO"].includes(normalizeOperationalState(detail.estadoEntrega)) ? "done" : ""}>Listo para entrega</span><span className={String(detail.estadoEntrega) === "EN_RUTA" || normalizeOperationalState(detail.estadoEntrega) === "ENTREGADO" ? "done" : ""}>En ruta</span><span className={normalizeOperationalState(detail.estadoEntrega) === "ENTREGADO" ? "done" : ""}>Entregado</span><span className={Number(detail.saldo || detail.total) <= .01 ? "done" : ""}>Cobrado</span></div>{normalizeOperationalState(detail.estadoEntrega) === "POR_COMPRAR" && <section className="preparation-control"><h3>Materiales a preparar</h3>{preparation.map((line,index) => <article key={line.codigo}><span><b>{line.producto}</b><small>{line.cantidadPedido} {line.presentacion} · Físico {line.stockFisico} · Reservado {line.stockReservado} · Disponible {line.stockDisponible}</small></span><label>Preparado<input type="number" min="0" step=".01" value={line.cantidadPreparada || ""} onChange={e => updatePreparation(index,{cantidadPreparada:Number(e.target.value)})}/></label><select value={line.estadoLinea} onChange={e => updatePreparation(index,{estadoLinea:e.target.value as PreparationLine["estadoLinea"]})}><option>PENDIENTE</option><option>PREPARADO</option><option>FALTANTE</option><option>OBSERVADO</option></select>{line.estadoLinea === "FALTANTE" && <><input type="number" min="0" step=".01" value={line.cantidadFaltante || ""} onChange={e => updatePreparation(index,{cantidadFaltante:Number(e.target.value)})} placeholder="Cantidad faltante"/><input value={line.motivo} onChange={e => updatePreparation(index,{motivo:e.target.value})} placeholder="Motivo del faltante"/></>}</article>)}<div className="preparation-actions"><button onClick={() => savePreparation(false)} disabled={savingPreparation}>Guardar preparación</button><button className="primary" onClick={() => savePreparation(true)} disabled={savingPreparation || !preparation.length || preparation.some(line => line.estadoLinea !== "PREPARADO")}>Marcar listo para entrega</button></div></section>}{normalizeOperationalState(detail.estadoEntrega) === "LISTO_PARA_ENTREGA" && <button className="assign-journey-button" onClick={() => setAssignmentOpen(true)}>Asignar a jornada</button>}<h3>Materiales asociados</h3><div className="detail-items">{detail.items.map(i => <div className="detail-row" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo}</small></span><span>{i.cantidad}</span><span>{money(i.precioUnitario)}</span><span><b>{money(i.subtotal)}</b></span></div>)}</div><div className="detail-total"><span>Total</span><strong>{money(detail.total)}</strong></div><div className="order-actions"><button onClick={() => startEdit(detail)}>✎ Editar pedido</button><button disabled={printing} onClick={() => printOrder(detail)}>{printing ? printStage : detail.codigoImpresion ? "Reimprimir boleta" : "Emitir e imprimir boleta"}</button></div></>}</section></div>}{assignmentOpen && detail && <div className="modal-bg route-modal-bg"><form className="modal assignment-modal" onSubmit={assignJourney}><button type="button" className="close" onClick={() => setAssignmentOpen(false)}>×</button><span className="eyebrow">ASIGNAR A JORNADA</span><h2>{detail.ventaId}</h2><label>Fecha<input type="date" required value={assignment.fecha} onChange={e => setAssignment({...assignment,fecha:e.target.value})}/></label><label>Repartidor<input required value={assignment.repartidor} onChange={e => setAssignment({...assignment,repartidor:e.target.value})}/></label><label>Vehículo<input required value={assignment.vehiculo} onChange={e => setAssignment({...assignment,vehiculo:e.target.value})}/></label><label>Ruta<input required value={assignment.ruta} onChange={e => setAssignment({...assignment,ruta:e.target.value})}/></label><label>Orden de visita<input type="number" min="1" value={assignment.ordenVisita} onChange={e => setAssignment({...assignment,ordenVisita:Number(e.target.value)})}/></label><button className="primary">Asignar y enviar a ruta</button></form></div>}</div>;
 }
 function Collections({ rows, clients, loading, load, call, notify }: {
     rows: Order[];
@@ -965,7 +1008,7 @@ function Collections({ rows, clients, loading, load, call, notify }: {
             setSaving(false);
         }
     }
-    const routeRows = rows.filter(o => normalizeOperationalState(o.estadoEntrega) === "LISTO_PARA_ENTREGA");
+    const routeRows = rows.filter(o => String(o.estadoEntrega || "").trim().toUpperCase().replace(/\s+/g, "_") === "EN_RUTA");
     const deliveredRows = rows.filter(o => String(o.estadoEntrega || "").toUpperCase() === "ENTREGADO");
     const pendingRows = deliveredRows.filter(o => Number(o.saldo || 0) > .01 && daysSince(o.fechaEntrega || o.fecha) <= 3);
     const overdueRows = deliveredRows.filter(o => Number(o.saldo || 0) > .01 && daysSince(o.fechaEntrega || o.fecha) > 3);
