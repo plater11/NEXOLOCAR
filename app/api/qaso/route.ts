@@ -9,7 +9,7 @@ const ALLOWED = new Set([
   "corregirPedido", "actualizarEstadoOperativoPedido", "obtenerHistorialEstadosPedido",
   "registrarGastoOperacion", "obtenerGastosOperacion", "obtenerGastosPendientes", "resolverGastoOperacion",
   "obtenerResumenJornada", "cerrarJornada", "obtenerRendicionDia", "validarRendicionDia",
-  "registrarMovimientoFinanciero", "obtenerCentroGerencial", "guardarPlaneamientoMensual",
+  "registrarMovimientoFinanciero", "obtenerCentroGerencial", "guardarPlaneamientoMensual", "duplicarPlaneamientoMensualAnterior",
   "obtenerPlaneamientoMensual", "guardarContabilidadDiaria", "obtenerContabilidadDiaria", "obtenerCurvaS",
   "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "crearUsuarioSistema",
   "actualizarUsuario", "validarIntegridad", "inicializarHojas", "repararFechasMovimientosVenta"

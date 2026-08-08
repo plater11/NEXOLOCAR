@@ -1184,7 +1184,10 @@ function obtenerEmisiones(filtros){
       items:items
     });
   }
-  return out.sort((a,b)=>b.fechaOrden-a.fechaOrden);
+  // Una venta puede aparecer repetida por importaciones o sincronizaciones antiguas.
+  // La API entrega una sola fila por ventaId para impedir duplicados en cualquier cliente.
+  const unicos={};out.forEach(v=>{if(!unicos[v.ventaId]||v.fechaOrden>=unicos[v.ventaId].fechaOrden)unicos[v.ventaId]=v;});
+  return Object.values(unicos).sort((a,b)=>b.fechaOrden-a.fechaOrden);
 }
 
 
@@ -1670,11 +1673,12 @@ function asegurarCobranza_(){
   defs.forEach(d=>{let sh=libro.getSheetByName(d[0])||libro.insertSheet(d[0]);if(sh.getLastRow()===0){sh.getRange(1,1,1,d[1].length).setValues([d[1]]).setBackground('#173f55').setFontColor('white').setFontWeight('bold');sh.setFrozenRows(1);sh.autoResizeColumns(1,d[1].length);}else{const h=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),d[1].length)).getValues()[0];d[1].forEach((x,i)=>{if(String(h[i]||'')!==x)sh.getRange(1,i+1).setValue(x);});}});
 }
 function cobranzaMap_(){asegurarCobranza_();const d=ss().getSheetByName(HOJA_COBRANZA).getDataRange().getValues(),m={};for(let i=1;i<d.length;i++){m[String(d[i][1])]={fila:i+1,id:d[i][0],ventaId:String(d[i][1]),fecha:fechaClave_(d[i][2]),cliente:String(d[i][3]),total:Number(d[i][4])||0,estadoEntrega:String(d[i][5]||'PENDIENTE'),estadoCobro:String(d[i][6]||'PENDIENTE'),efectivo:Number(d[i][7])||0,yape:Number(d[i][8])||0,plin:Number(d[i][9])||0,transferencia:Number(d[i][10])||0,pos:Number(d[i][11])||0,otros:Number(d[i][12])||0,totalCobrado:Number(d[i][13])||0,saldo:Number(d[i][14])||0,fechaPromesa:d[i][15]?fechaClave_(d[i][15]):'',medioPrometido:String(d[i][16]||''),observacion:String(d[i][17]||''),responsable:String(d[i][18]||''),estadoRendicion:String(d[i][19]||'PENDIENTE')};}return m;}
+function normalizarEstadoOperativo_(valor){const e=String(valor||'POR COMPRAR').trim().toUpperCase().replace(/_/g,' ');if(e==='COMPRADO'||e==='LISTO PARA ENTREGA')return 'LISTO_PARA_ENTREGA';if(e==='ENTREGADO')return 'ENTREGADO';if(e==='OBSERVADO')return 'OBSERVADO';return 'POR_COMPRAR';}
 function obtenerCobranzaPedidos(filtros){
   requerirPerfil(['MASTER','PREVENTA']); asegurarCobranza_(); filtros=filtros||{};
   const hoy=hoyClave_(),desde=filtros.desde||hoy.slice(0,8)+'01',hasta=filtros.hasta||hoy;
   const ventas=obtenerEmisiones({fechaDesde:desde,fechaHasta:hasta,texto:filtros.texto||''}),map=cobranzaMap_();
-  return ventas.map(v=>{const c=map[v.ventaId]||{};return Object.assign({},v,{estadoEntrega:c.estadoEntrega||'PENDIENTE',fechaEntrega:c.fecha||'',estadoCobro:c.estadoCobro||'PENDIENTE',efectivo:c.efectivo||0,yape:c.yape||0,plin:c.plin||0,transferencia:c.transferencia||0,pos:c.pos||0,otros:c.otros||0,totalCobrado:c.totalCobrado||0,saldo:c.saldo||0,fechaPromesa:c.fechaPromesa||'',medioPrometido:c.medioPrometido||'',observacionCobro:c.observacion||'',estadoRendicion:c.estadoRendicion||'PENDIENTE'});}).map(x=>{x.saldo=Math.max(0,Number(x.total||0)-Number(x.totalCobrado||0));return x;});
+  return ventas.map(v=>{const c=map[v.ventaId]||{},estadoOperativo=normalizarEstadoOperativo_(c.estadoEntrega);return Object.assign({},v,{estadoOperativo,estadoEntrega:estadoOperativo,fechaEntrega:c.fecha||'',estadoCobro:c.estadoCobro||'PENDIENTE',efectivo:c.efectivo||0,yape:c.yape||0,plin:c.plin||0,transferencia:c.transferencia||0,pos:c.pos||0,otros:c.otros||0,totalCobrado:c.totalCobrado||0,saldo:c.saldo||0,fechaPromesa:c.fechaPromesa||'',medioPrometido:c.medioPrometido||'',observacionCobro:c.observacion||'',estadoRendicion:c.estadoRendicion||'PENDIENTE'});}).map(x=>{x.saldo=Math.max(0,Number(x.total||0)-Number(x.totalCobrado||0));return x;});
 }
 function actualizarCxC_(p){
   const sh=ss().getSheetByName(HOJA_CXC),d=sh.getDataRange().getValues();for(let i=d.length-1;i>=1;i--)if(String(d[i][1])===String(p.ventaId))sh.deleteRow(i+1);
