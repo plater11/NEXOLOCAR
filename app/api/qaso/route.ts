@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
 import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, mirrorSaleMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_ORDER_MUTATIONS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
 import { createSupabaseUser, deleteSupabaseUser, listSupabaseUsers, loginSupabase, logoutSupabase, requireSupabaseSession, updateSupabaseUser, type UserPayload } from "../../../lib/supabase/auth";
-import { assignNativeJourney, closeNativeJourney, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativeRendition, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState } from "../../../lib/supabase/operations";
+import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState } from "../../../lib/supabase/operations";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "obtenerCatalogoProductos",
@@ -11,7 +11,7 @@ const ALLOWED = new Set([
   "registrarMovimientosMasivos", "validarCargaMasivaInventario", "importarCargaMasivaInventario", "obtenerMovimientosIngreso", "obtenerHistorial",
   "obtenerEmisiones", "generarCodigoImpresion", "obtenerCobranzaPedidos", "guardarCobranzaPedido",
   "corregirPedido", "actualizarEstadoOperativoPedido", "obtenerHistorialEstadosPedido",
-  "obtenerPreparacionPedido", "guardarPreparacionPedido", "asignarPedidoJornada", "obtenerActividadReciente",
+  "obtenerPreparacionPedido", "guardarPreparacionPedido", "asignarPedidoJornada", "obtenerConsolidadoCompra", "actualizarPedidosMasivo", "obtenerActividadReciente",
   "registrarGastoOperacion", "obtenerGastosOperacion", "obtenerGastosPendientes", "resolverGastoOperacion",
   "obtenerResumenJornada", "cerrarJornada", "obtenerRendicionDia", "validarRendicionDia",
   "registrarMovimientoFinanciero", "obtenerCentroGerencial", "guardarPlaneamientoMensual", "duplicarPlaneamientoMensualAnterior",
@@ -64,6 +64,8 @@ export async function POST(request: Request) {
         if (body.fn === "registrarVenta") return NextResponse.json({ ok: true, resultado: await createNativeSale(String(body.token || ""), (body.args?.[0] || {}) as Parameters<typeof createNativeSale>[1]) });
         if (body.fn === "obtenerPreparacionPedido") return NextResponse.json({ ok: true, resultado: await getNativePreparation(body.args?.[0]) });
         if (body.fn === "guardarPreparacionPedido") return NextResponse.json({ ok: true, resultado: await saveNativePreparation(String(body.token || ""), (body.args?.[0] || {}) as Parameters<typeof saveNativePreparation>[1]) });
+        if (body.fn === "obtenerConsolidadoCompra") return NextResponse.json({ ok: true, resultado: await getNativePurchaseConsolidation(String(body.token || ""), (body.args?.[0] || {}) as Parameters<typeof getNativePurchaseConsolidation>[1]) });
+        if (body.fn === "actualizarPedidosMasivo") return NextResponse.json({ ok: true, resultado: await bulkNativeOrders(String(body.token || ""), (body.args?.[0] || {}) as Parameters<typeof bulkNativeOrders>[1]) });
         if (body.fn === "asignarPedidoJornada") return NextResponse.json({ ok: true, resultado: await assignNativeJourney(String(body.token || ""), current.user.id, (body.args?.[0] || {}) as Parameters<typeof assignNativeJourney>[2]) });
         if (body.fn === "guardarCobranzaPedido") return NextResponse.json({ ok: true, resultado: await processNativeCollection(String(body.token || ""), (body.args?.[0] || {}) as Parameters<typeof processNativeCollection>[1]) });
         if (body.fn === "obtenerCobranzaPedidos") return NextResponse.json({ ok: true, resultado: await getNativeCollections((body.args?.[0] || {}) as Record<string, unknown>) });

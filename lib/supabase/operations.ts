@@ -5,6 +5,8 @@ type SalePayload = { cliente?: string; clienteId?: string; items?: SaleItem[]; o
 type PreparationPayload = { ventaId?: string; lineas?: Array<Record<string, unknown>>; marcarListo?: boolean };
 type AssignmentPayload = { ventaId?: string; fecha?: string; ruta?: string; ordenVisita?: number };
 type CollectionPayload = Record<string, unknown> & { ventaId?: string; solicitudId?: string };
+type ConsolidationPayload = { desde?: string; hasta?: string; ventaIds?: string[] };
+type BulkOrderPayload = { ventaIds?: string[]; accion?: string; payload?: Record<string, unknown> };
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
 async function orderByCode(code: unknown) {
@@ -71,9 +73,39 @@ export async function saveNativePreparation(token: string, payload: PreparationP
   const { data: products, error: productError } = await admin.from("productos").select("id,codigo"); if (productError) throw productError;
   const ids = new Map((products || []).map(row => [row.codigo, row.id]));
   const { data: warehouses, error: warehouseError } = await admin.from("almacenes").select("id").eq("codigo", "PRINCIPAL").limit(1); if (warehouseError || !warehouses?.[0]) throw warehouseError || new Error("Almacén principal no configurado.");
-  const lines = (payload.lineas || []).map(line => ({ producto_id: ids.get(String(line.codigo || "")) || line.productoId, cantidad_preparada: number(line.cantidadPreparada), estado: String(line.estadoLinea || "PENDIENTE"), cantidad_faltante: number(line.cantidadFaltante), motivo: String(line.motivo || ""), observacion: String(line.observacion || "") }));
+  const lines = (payload.lineas || []).map(line => ({ producto_id: ids.get(String(line.codigo || "")) || line.productoId, cantidad_preparada: number(line.cantidadPreparada), motivo: String(line.motivo || ""), observacion: String(line.observacion || "") }));
   const { data, error } = await getSupabaseServerClient(token).rpc("guardar_preparacion_pedido", { p_pedido_id: order.id, p_lineas: lines, p_marcar_listo: Boolean(payload.marcarListo), p_almacen_id: warehouses[0].id });
   if (error) throw error; return { ok: true, mensaje: payload.marcarListo ? "Pedido listo y stock reservado." : "Preparación guardada.", resultado: data };
+}
+
+export async function getNativePurchaseConsolidation(token: string, payload: ConsolidationPayload) {
+  const db = getSupabaseAdminClient();
+  let ids: string[] | null = null;
+  if (payload.ventaIds?.length) {
+    const { data, error } = await db.from("pedidos").select("id,codigo_pedido").in("codigo_pedido", payload.ventaIds);
+    if (error) throw error;
+    ids = (data || []).map(row => row.id);
+  }
+  const { data, error } = await getSupabaseServerClient(token).rpc("obtener_consolidado_compra", {
+    p_desde: payload.desde || new Date().toISOString().slice(0, 10),
+    p_hasta: payload.hasta || new Date().toISOString().slice(0, 10),
+    p_pedido_ids: ids,
+  });
+  if (error) throw error;
+  return data as { consolidado: Array<Record<string, unknown>>; origen: Array<Record<string, unknown>> };
+}
+
+export async function bulkNativeOrders(token: string, payload: BulkOrderPayload) {
+  const db = getSupabaseAdminClient();
+  const { data: orders, error: orderError } = await db.from("pedidos").select("id,codigo_pedido").in("codigo_pedido", payload.ventaIds || []);
+  if (orderError) throw orderError;
+  const { data, error } = await getSupabaseServerClient(token).rpc("bulk_update_orders", {
+    p_pedido_ids: (orders || []).map(row => row.id),
+    p_accion: String(payload.accion || ""),
+    p_payload: payload.payload || {},
+  });
+  if (error) throw error;
+  return data as Record<string, unknown>;
 }
 
 export async function assignNativeJourney(token: string, userId: string, payload: AssignmentPayload) {
