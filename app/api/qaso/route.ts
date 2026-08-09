@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
+import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, mirrorSaleMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_ORDER_MUTATIONS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "obtenerCatalogoProductos",
@@ -17,19 +19,84 @@ const ALLOWED = new Set([
 ]);
 
 export async function GET() {
-  return NextResponse.json({ ok: true, configured: Boolean(process.env.APPS_SCRIPT_URL) });
+  return NextResponse.json({ ok: true, configured: Boolean(process.env.APPS_SCRIPT_URL), dataSource: dataSourceMode(), supabaseConfigured: isSupabaseConfigured() });
 }
 
 export async function POST(request: Request) {
   const endpoint = process.env.APPS_SCRIPT_URL;
-  if (!endpoint) return NextResponse.json({ ok: false, code: "NOT_CONFIGURED", message: "Falta configurar APPS_SCRIPT_URL." }, { status: 503 });
   try {
     const body = await request.json() as { fn?: string; args?: unknown[]; token?: string };
     if (!body.fn || !ALLOWED.has(body.fn)) return NextResponse.json({ ok: false, message: "Operación no permitida." }, { status: 403 });
+    const mode = dataSourceMode();
+    if (mode === "supabase" && SUPABASE_COMPAT_READS.has(body.fn)) {
+      if (!isSupabaseConfigured()) return NextResponse.json({ ok: false, code: "SUPABASE_NOT_CONFIGURED", message: "Supabase no está configurado." }, { status: 503 });
+      if (!SUPABASE_COMPAT_READS.has(body.fn)) return NextResponse.json({ ok: false, code: "SUPABASE_OPERATION_PENDING", message: `La operación ${body.fn} todavía no ha sido validada para el corte.` }, { status: 501 });
+      return NextResponse.json({ ok: true, resultado: await executeCompatRead(body.fn, body.args || []) });
+    }
+    if (!endpoint) return NextResponse.json({ ok: false, code: "NOT_CONFIGURED", message: "Falta configurar APPS_SCRIPT_URL." }, { status: 503 });
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 60000);
     const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "text/plain;charset=utf-8" }, body: JSON.stringify({ fn: body.fn, args: body.args || [], token: body.token || "" }), signal: controller.signal, redirect: "follow" });
     clearTimeout(timer); const text = await response.text();
-    try { return NextResponse.json(JSON.parse(text), { status: response.ok ? 200 : 502 }); } catch { return NextResponse.json({ ok: false, message: "Apps Script devolvió una respuesta no válida." }, { status: 502 }); }
+    try {
+      const parsed = JSON.parse(text) as { ok?: boolean; resultado?: unknown };
+      if (mode !== "sheets" && isSupabaseConfigured() && parsed.ok && SUPABASE_CLIENT_MUTATIONS.has(body.fn)) {
+        try {
+          let sheetClients: Array<Record<string, string>> = [];
+          if (body.fn === "registrarCliente") {
+            const mirrorResponse = await fetch(endpoint, {
+              method: "POST",
+              headers: { "content-type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({ fn: "obtenerClientes", args: [""], token: body.token || "" }),
+              redirect: "follow",
+            });
+            const mirrorEnvelope = await mirrorResponse.json() as { ok?: boolean; resultado?: Array<Record<string, string>> };
+            if (!mirrorEnvelope.ok || !Array.isArray(mirrorEnvelope.resultado)) throw new Error("No se pudo recuperar el cliente creado.");
+            sheetClients = mirrorEnvelope.resultado;
+          }
+          await mirrorClientMutation(body.fn, body.args || [], sheetClients);
+        } catch (mirrorError) {
+          console.error("[SUPABASE_WRITE_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
+        }
+      }
+      if (mode !== "sheets" && isSupabaseConfigured() && parsed.ok && SUPABASE_PRODUCT_MUTATIONS.has(body.fn)) {
+        try {
+          const mirrorResponse = await fetch(endpoint, {
+            method: "POST",
+            headers: { "content-type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({ fn: "obtenerCatalogoProductos", args: [], token: body.token || "" }),
+            redirect: "follow",
+          });
+          const mirrorEnvelope = await mirrorResponse.json() as { ok?: boolean; resultado?: Array<Record<string, unknown>> };
+          if (!mirrorEnvelope.ok || !Array.isArray(mirrorEnvelope.resultado)) throw new Error("No se pudo recuperar el catálogo actualizado.");
+          await mirrorProductMutation(body.fn, body.args || [], mirrorEnvelope.resultado);
+        } catch (mirrorError) {
+          console.error("[SUPABASE_PRODUCT_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
+        }
+      }
+      if (mode !== "sheets" && isSupabaseConfigured() && parsed.ok && SUPABASE_ORDER_MUTATIONS.has(body.fn)) {
+        try {
+          const saleResult = parsed.resultado as { ok?: boolean; ventaId?: string; total?: number; fecha?: string; clienteId?: string };
+          if (saleResult?.ok) {
+            const clientsResponse = await fetch(endpoint, {
+              method: "POST",
+              headers: { "content-type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({ fn: "obtenerClientes", args: [""], token: body.token || "" }),
+              redirect: "follow",
+            });
+            const clientsEnvelope = await clientsResponse.json() as { ok?: boolean; resultado?: Array<Record<string, string>> };
+            if (!clientsEnvelope.ok || !Array.isArray(clientsEnvelope.resultado)) throw new Error("No se pudo resolver el cliente de la venta.");
+            await mirrorSaleMutation(body.args || [], saleResult, clientsEnvelope.resultado);
+          }
+        } catch (mirrorError) {
+          console.error("[SUPABASE_ORDER_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
+        }
+      }
+      if (mode === "dual" && isSupabaseConfigured() && SUPABASE_COMPAT_READS.has(body.fn) && parsed.ok) {
+        try { const supabase = await executeCompatRead(body.fn, body.args || []); const comparison = compareResult(body.fn, parsed.resultado, supabase); if (!comparison.matches) console.warn("[DATA_SOURCE_DIFF]", comparison); }
+        catch (comparisonError) { console.warn("[DATA_SOURCE_COMPARE_ERROR]", body.fn, comparisonError instanceof Error ? comparisonError.message : comparisonError); }
+      }
+      return NextResponse.json(parsed, { status: response.ok ? 200 : 502 });
+    } catch { return NextResponse.json({ ok: false, message: "Apps Script devolvió una respuesta no válida." }, { status: 502 }); }
   } catch (error) {
     const message = error instanceof Error && error.name === "AbortError"
       ? "Google Sheets tardó más de 60 segundos. Intenta nuevamente."
