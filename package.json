@@ -10,8 +10,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --ignore-pattern .next"
+    ,"migrate:clientes": "node scripts/migration/01-migrate-clientes.mjs"
+    ,"migrate:productos": "node scripts/migration/02-migrate-productos.mjs"
+    ,"migrate:pedidos": "node scripts/migration/03-migrate-pedidos.mjs"
+    ,"migrate:inventario": "node scripts/migration/04-migrate-inventario.mjs"
+    ,"migrate:compare": "node scripts/migration/compare-sources.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.2",
     "drizzle-orm": "0.45.2",
     "next": "16.2.6",
     "react": "19.2.6",

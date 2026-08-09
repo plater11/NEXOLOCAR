@@ -5,6 +5,10 @@ dist/
 .env
 .env.local
 .env.production
+.env.*.local
+.npm-cache/
+scripts/migration/output/
+scripts/migration/input/
 *.log
 .clasp.json
 .clasprc.json
