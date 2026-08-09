@@ -89,6 +89,11 @@ type Order = {
     observacionCobro?: string;
     codigoImpresion?: string;
     fechaImpresion?: string;
+    telefono?: string;
+    subestadoOperativo?: string;
+    motivoIncidencia?: string;
+    fechaReprogramada?: string;
+    fechaVencimientoCobro?: string;
 };
 type Summary = {
     totalProductos: number;
@@ -109,7 +114,7 @@ type RenditionData = { fecha: string; fuente?: string; pedidosPendientes?: numbe
 type JourneySummary = { fecha: string; jornada?: { id?: string; estado?: string; repartidor?: string; vehiculo?: string; ruta?: string }; pedidosAsignados: number; entregados: number; noEntregados: number; ventasEntregadas: number; totalCobrado: number; saldoPendiente: number; cobros: { total: number; efectivo: number; yape: number; plin: number; transferencia: number; otros: number }; saldos: { dentroPlazo: number; urgente: number }; noEntregadosDetalle?: { pendientes: number; clienteAusente: number; reprogramados: number; rechazados: number; observados?: number }; gastos: { total: number; pendientes: number; aprobados: number; porCategoria: Record<string, number> }; efectivoEsperado: number };
 type ExpenseApproval = { solicitudId: string; fecha: string; partida: string; descripcion: string; importe: number; canal: string; usuario: string; estadoAprobacion?: string; observacion?: string; origenDinero?: string; proveedor?: string };
 type ActivityRecord = { id: string; fecha: string; fechaOrden: number; tipo: string; ventaId: string; cliente: string; descripcion: string; monto: number; usuario: string };
-type PreparationLine = { ventaId: string; codigo: string; producto: string; cantidadPedido: number; presentacion?: string; unidadesBase: number; cantidadPreparada: number; estadoLinea: "PENDIENTE" | "PREPARADO" | "FALTANTE" | "OBSERVADO"; cantidadFaltante: number; motivo: string; observacion: string; estadoStock: string; stockFisico: number; stockReservado: number; stockEnRuta: number; stockDisponible: number };
+type PreparationLine = { ventaId: string; codigo: string; producto: string; cantidadPedido: number; presentacion?: string; unidadesBase: number; cantidadPreparada: number; estadoLinea: "PENDIENTE" | "PARCIAL" | "PREPARADO" | "FALTANTE" | "OBSERVADO"; cantidadFaltante: number; motivo: string; observacion: string; estadoStock: string; stockFisico: number; stockReservado: number; stockEnRuta: number; stockDisponible: number };
 type AnalysisSeries = { codigo: string; nombre: string; slot: number; meses: number[]; total: number };
 type AnalysisGroup = { nombre: string; cantidad: number };
 type AnalysisDashboard = { meses: string[]; opciones: Array<{ codigo: string; nombre: string }>; seleccion: string[]; series: AnalysisSeries[]; distribucion: AnalysisGroup[]; totalProductos: number; totalVentas: number };
@@ -795,7 +800,8 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     notify: (s: string) => void;
     onOrderUpdated: (order: Order) => void;
 }) {
-    const [detail, setDetail] = useState<Order | null>(null);
+    const [rawDetail, setDetail] = useState<Order | null>(null);
+    const detail = rawDetail as Order;
     const dialogRef = useRef<HTMLElement>(null);
     const returnFocusRef = useRef<HTMLElement | null>(null);
     const [query, setQuery] = useState("");
@@ -804,6 +810,13 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     const [orderTab, setOrderTab] = useState("POR_COMPRAR");
     const [emissionFilter, setEmissionFilter] = useState<"TODAS" | "EMITIDA" | "NO_EMITIDA">("TODAS");
     const [clientFilter, setClientFilter] = useState("TODOS");
+    const [dateFilter, setDateFilter] = useState("HOY");
+    const [dateFrom, setDateFrom] = useState(today());
+    const [dateTo, setDateTo] = useState(today());
+    const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const [autoSaveState, setAutoSaveState] = useState("");
+    const preparationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [editing, setEditing] = useState(false);
     const [savingEdit, setSavingEdit] = useState(false);
     const [preparation, setPreparation] = useState<PreparationLine[]>([]);
@@ -819,14 +832,38 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     const counts = Object.fromEntries(states.map(state => [state, uniqueOrders.filter(o => stateOf(o) === state).length]));
     const emittedCount = uniqueOrders.filter(o => Boolean(o.codigoImpresion)).length;
     const orderClients = [...new Set(uniqueOrders.map(o => o.cliente).filter(Boolean))].sort();
-    const visible = uniqueOrders.filter(o => stateOf(o) === orderTab && (emissionFilter === "TODAS" || (emissionFilter === "EMITIDA" ? Boolean(o.codigoImpresion) : !o.codigoImpresion)) && (clientFilter === "TODOS" || o.cliente === clientFilter) && JSON.stringify(o).toLowerCase().includes(query.toLowerCase()));
+    const range = useMemo(() => {
+        const end = new Date(`${today()}T12:00:00`), start = new Date(end);
+        if (dateFilter === "7_DIAS") start.setDate(start.getDate() - 6);
+        if (dateFilter === "15_DIAS") start.setDate(start.getDate() - 14);
+        if (dateFilter === "ESTE_MES") start.setDate(1);
+        if (dateFilter === "MES_ANTERIOR") { start.setMonth(start.getMonth() - 1, 1); end.setDate(0); }
+        const iso = (date: Date) => date.toISOString().slice(0, 10);
+        return dateFilter === "PERSONALIZADO" ? { from: dateFrom, to: dateTo } : { from: iso(start), to: iso(end) };
+    }, [dateFilter, dateFrom, dateTo]);
+    const visible = uniqueOrders.filter(o => { const orderDate = new Date(o.fecha).toISOString().slice(0,10); return stateOf(o) === orderTab && orderDate >= range.from && orderDate <= range.to && (emissionFilter === "TODAS" || (emissionFilter === "EMITIDA" ? Boolean(o.codigoImpresion) : !o.codigoImpresion)) && (clientFilter === "TODOS" || o.cliente === clientFilter) && JSON.stringify(o).toLowerCase().includes(query.toLowerCase()); });
     function openDetail(order: Order) {
         returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         setDetail({ ...order, estadoEntrega: order.estadoOperativo || order.estadoEntrega });
         setPreparation([]);
         void call<{ lineas: PreparationLine[] }>("obtenerPreparacionPedido", [order.ventaId]).then(result => setPreparation(result.lineas || [])).catch(() => setPreparation([]));
     }
-    function updatePreparation(index: number, patch: Partial<PreparationLine>) { setPreparation(lines => lines.map((line, current) => current === index ? { ...line, ...patch } : line)); }
+    function updatePreparation(index: number, input: number | Partial<PreparationLine>) {
+        const value = typeof input === "number" ? input : Number(input.cantidadPreparada || 0);
+        const next = preparation.map((line, current) => {
+            if (current !== index) return line;
+            const maximum = Number(line.unidadesBase || line.cantidadPedido), quantity = Math.max(0, Math.min(Number(value) || 0, maximum));
+            return { ...line, cantidadPreparada: quantity, cantidadFaltante: Math.max(maximum - quantity, 0), estadoLinea: quantity === 0 ? "PENDIENTE" as const : quantity >= maximum ? "PREPARADO" as const : "PARCIAL" as const };
+        });
+        setPreparation(next);
+        if (Number(value) > Number(next[index].unidadesBase || next[index].cantidadPedido)) notify("La cantidad máxima corresponde a la cantidad solicitada.");
+        setAutoSaveState("Guardando…");
+        if (preparationTimer.current) clearTimeout(preparationTimer.current);
+        preparationTimer.current = setTimeout(() => {
+            if (!detail) return;
+            void call<{ ok: boolean }>("guardarPreparacionPedido", [{ ventaId: detail.ventaId, lineas: next, marcarListo: false }]).then(() => setAutoSaveState("Guardado")).catch(error => setAutoSaveState(error instanceof Error ? error.message : "Pendiente de guardar"));
+        }, 650);
+    }
     async function savePreparation(markReady = false) {
         if (!detail || savingPreparation) return;
         setSavingPreparation(true);
@@ -846,6 +883,33 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
             if (result.ok) { setAssignmentOpen(false); onOrderUpdated({ ...detail, estadoOperativo: "LISTO_PARA_ENTREGA", estadoEntrega: "EN_RUTA" }); setDetail(null); }
         }
         catch (error) { notify(error instanceof Error ? error.message : "No se asignó la jornada"); }
+    }
+    function toggleOrder(order: Order, checked: boolean) { setSelectedOrders(current => { const next = new Set(current); if (checked) next.add(order.ventaId); else next.delete(order.ventaId); return next; }); }
+    function toggleVisible() { const all = visible.length > 0 && visible.every(order => selectedOrders.has(order.ventaId)); setSelectedOrders(current => { const next = new Set(current); visible.forEach(order => all ? next.delete(order.ventaId) : next.add(order.ventaId)); return next; }); }
+    async function downloadConsolidation() {
+        setBulkBusy(true);
+        try {
+            const result = await call<{ consolidado: Array<Record<string, unknown>>; origen: Array<Record<string, unknown>> }>("obtenerConsolidadoCompra", [{ desde: range.from, hasta: range.to, ventaIds: selectedOrders.size ? [...selectedOrders] : undefined }]);
+            const XLSX = await import("xlsx");
+            const book = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(result.consolidado), "COMPRA CONSOLIDADA");
+            XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(result.origen), "PEDIDOS ORIGEN");
+            XLSX.writeFile(book, `Consolidado_Compra_${range.from}_${range.to}.xlsx`);
+            notify(`Consolidado generado: ${result.consolidado.length} producto(s).`);
+        } catch (error) { notify(error instanceof Error ? error.message : "No se generó el consolidado"); }
+        finally { setBulkBusy(false); }
+    }
+    async function bulkAction(action: "EN_RUTA") {
+        if (!selectedOrders.size || bulkBusy) return;
+        const chosen = visible.filter(order => selectedOrders.has(order.ventaId));
+        if (!window.confirm(`¿Enviar ${chosen.length} pedidos a ruta?\nClientes: ${new Set(chosen.map(order => order.cliente)).size}\nValor total: ${money(chosen.reduce((sum, order) => sum + order.total, 0))}`)) return;
+        setBulkBusy(true);
+        try {
+            const result = await call<{ procesados: string[]; rechazados: Array<{ error: string }> }>("actualizarPedidosMasivo", [{ ventaIds: chosen.map(order => order.ventaId), accion: action }]);
+            notify(`${result.procesados?.length || 0} pedido(s) enviados a ruta${result.rechazados?.length ? `; ${result.rechazados.length} rechazado(s)` : ""}.`);
+            setSelectedOrders(new Set()); await refresh();
+        } catch (error) { notify(error instanceof Error ? error.message : "No se procesó la acción masiva"); }
+        finally { setBulkBusy(false); }
     }
     function closeDetail() {
         if (editing && !window.confirm("Hay cambios sin guardar. ¿Deseas salir?"))
@@ -929,6 +993,16 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     }
     function startEdit(o: Order) { setEditClient(o.cliente); setEditObs(o.observaciones || ""); setEditItems(o.items.map(i => ({ codigo: i.codigo, nombre: i.nombre, cantidad: Number(i.cantidad), precioUnitario: Number(i.precioUnitario) }))); setEditing(true); }
     async function saveEdit() { if (!detail || savingEdit) return; if (!editClient.trim() || !editItems.length || editItems.some(i => !(i.cantidad > 0))) return notify("Revisa el cliente y las cantidades del pedido."); setSavingEdit(true); try { const result = await call<{ ok: boolean; mensaje: string; total?: number }>("corregirPedido", [{ ventaId: detail.ventaId, cliente: editClient.trim(), observaciones: editObs, items: editItems.map(i => ({ codigo: i.codigo, cantidad: i.cantidad })) }]); if (!result.ok) throw new Error(result.mensaje); notify(result.mensaje); setEditing(false); setDetail(null); await refresh(); } catch (x) { notify(x instanceof Error ? x.message : "No se pudo editar el pedido"); } finally { setSavingEdit(false); } }
+    const allPrepared = preparation.length > 0 && preparation.every(line => line.estadoLinea === "PREPARADO");
+    return <div className="orders-page orders-flow-v2">
+        <Heading eyebrow="OPERACIÓN Y DESPACHO" title="Pedidos y emisión" text="Compra, picking, despacho, entrega y cobranza sobre el mismo pedido."/>
+        <nav className="order-state-tabs">{states.map(state => <button key={state} className={orderTab === state ? "active" : ""} onClick={() => { setOrderTab(state); setSelectedOrders(new Set()); }}><span>{state.replace(/_/g," ")}</span><b>{counts[state]}</b></button>)}</nav>
+        <section className="order-period-tools"><label>Periodo<select value={dateFilter} onChange={e => setDateFilter(e.target.value)}><option value="HOY">Hoy</option><option value="7_DIAS">Últimos 7 días</option><option value="15_DIAS">Últimos 15 días</option><option value="ESTE_MES">Este mes</option><option value="MES_ANTERIOR">Mes anterior</option><option value="PERSONALIZADO">Personalizado</option></select></label>{dateFilter === "PERSONALIZADO" && <><label>Desde<input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}/></label><label>Hasta<input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}/></label></>}<label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Pedido, boleta, cliente o teléfono…"/></label><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos</option>{orderClients.map(client => <option key={client}>{client}</option>)}</select></label></section>
+        {visible.length > 0 && <section className="bulk-order-bar"><label><input type="checkbox" checked={visible.every(order => selectedOrders.has(order.ventaId))} onChange={toggleVisible}/> Seleccionar todos los visibles</label><b>{selectedOrders.size} seleccionados</b>{orderTab === "POR_COMPRAR" && <button disabled={bulkBusy} onClick={downloadConsolidation}>Descargar consolidado Excel</button>}{orderTab === "LISTO_PARA_ENTREGA" && <button className="primary" disabled={bulkBusy || !selectedOrders.size} onClick={() => bulkAction("EN_RUTA")}>Enviar a ruta</button>}</section>}
+        <section className="panel order-card-list">{visible.map(order => <article key={order.ventaId} className="selectable-order"><input type="checkbox" checked={selectedOrders.has(order.ventaId)} onChange={e => toggleOrder(order,e.target.checked)}/><button className="order-card-main" onClick={() => openDetail(order)}><span><b>{order.ventaId}</b><small>{order.cliente} · {order.telefono || "Sin teléfono"}</small></span><span><small>{order.fecha}</small><b>{money(order.total)}</b></span><em>{stateOf(order).replace(/_/g," ")}</em></button></article>)}{!visible.length && <p className="empty-state">No hay pedidos para los filtros seleccionados.</p>}</section>
+        {detail && <div className="modal-bg order-dialog-bg" onMouseDown={e => { if(e.target===e.currentTarget) closeDetail(); }}><section className="order-detail order-dialog flow-order-detail"><button className="close" onClick={closeDetail}>×</button><small className="eyebrow">PEDIDO</small><h2>{detail.ventaId}</h2><p>{detail.cliente} · {detail.telefono || "Sin teléfono"}</p><div className={`emission-summary ${detail.codigoImpresion ? "emitted" : ""}`}><b>{detail.codigoImpresion ? "✓ Boleta emitida" : "Boleta no emitida"}</b>{detail.codigoImpresion && <small>{detail.codigoImpresion}</small>}</div><div className="order-progress"><span className="done">Pedido creado ✓</span><span className={stateOf(detail)!=="POR_COMPRAR" ? "done" : ""}>Preparación</span><span className={["LISTO_PARA_ENTREGA","ENTREGADO"].includes(stateOf(detail)) ? "done" : ""}>Listo</span><span className={detail.estadoEntrega==="EN_RUTA" || stateOf(detail)==="ENTREGADO" ? "done" : ""}>En ruta</span><span className={stateOf(detail)==="ENTREGADO" ? "done" : ""}>Entregado</span><span className={Number(detail.saldo || detail.total)<=.01 ? "done" : ""}>Cobrado</span></div>{stateOf(detail)==="POR_COMPRAR" && <section className="preparation-control"><header><h3>Materiales para preparar</h3><small>{autoSaveState}</small></header>{preparation.map((line,index) => { const requested=Number(line.unidadesBase || line.cantidadPedido); return <article key={line.codigo}><span><b>{line.producto}</b><small>{line.codigo} · Solicitado {requested} · Disponible {line.stockDisponible}</small></span><label>Preparado<input type="number" min="0" max={requested} step=".01" value={line.cantidadPreparada || ""} onChange={e => updatePreparation(index,Number(e.target.value))}/></label><strong className={`picking-${line.estadoLinea.toLowerCase()}`}>{line.estadoLinea === "PREPARADO" ? "✓ PREPARADO" : line.estadoLinea === "PARCIAL" ? "⚠ PARCIAL" : "PENDIENTE"}</strong></article>})}{allPrepared && <p className="all-prepared">✓ TODOS LOS MATERIALES PREPARADOS</p>}<button className="primary" disabled={savingPreparation || !allPrepared} onClick={() => savePreparation(true)}>Listo para entregar</button></section>}{stateOf(detail)==="LISTO_PARA_ENTREGA" && <button className="primary assign-journey-button" onClick={() => setAssignmentOpen(true)}>Asignar y enviar a ruta</button>}<h3>Materiales asociados</h3><div className="detail-items">{detail.items.map(item => <div className="detail-row" key={item.codigo}><span><b>{item.nombre}</b><small>{item.codigo}</small></span><b>{item.cantidad}</b><strong>{money(item.subtotal)}</strong></div>)}</div><div className="detail-total"><span>Total</span><strong>{money(detail.total)}</strong></div><div className="order-actions"><button onClick={() => startEdit(detail)}>Editar pedido</button><button disabled={printing} onClick={() => printOrder(detail)}>{detail.codigoImpresion ? "Reimprimir boleta" : "Emitir e imprimir"}</button></div></section></div>}
+        {assignmentOpen && detail && <div className="modal-bg"><form className="modal assignment-modal" onSubmit={assignJourney}><button type="button" className="close" onClick={() => setAssignmentOpen(false)}>×</button><h2>Enviar a ruta</h2><label>Fecha<input type="date" required value={assignment.fecha} onChange={e => setAssignment({...assignment,fecha:e.target.value})}/></label><label>Ruta<input required value={assignment.ruta} onChange={e => setAssignment({...assignment,ruta:e.target.value})}/></label><label>Orden<input type="number" min="1" value={assignment.ordenVisita} onChange={e => setAssignment({...assignment,ordenVisita:Number(e.target.value)})}/></label><button className="primary">Confirmar salida</button></form></div>}
+    </div>;
     return <div className="orders-page"><Heading eyebrow="OPERACIÓN Y DESPACHO" title="Pedidos y emisión" text="Controla la compra, preparación y emisión de cada pedido."/><nav className="order-state-tabs">{states.map(state => <button key={state} className={orderTab === state ? "active" : ""} onClick={() => setOrderTab(state)}><span>{state.replace(/_/g, " ")}</span><b>{counts[state]}</b></button>)}</nav><nav className="order-secondary-filters"><button className={emissionFilter === "EMITIDA" ? "active" : ""} onClick={() => setEmissionFilter(value => value === "EMITIDA" ? "TODAS" : "EMITIDA")}>Boletas emitidas <b>{emittedCount}</b></button><button className={emissionFilter === "NO_EMITIDA" ? "active" : ""} onClick={() => setEmissionFilter(value => value === "NO_EMITIDA" ? "TODAS" : "NO_EMITIDA")}>Boletas no emitidas <b>{uniqueOrders.length - emittedCount}</b></button><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos los clientes</option>{orderClients.map(client => <option key={client}>{client}</option>)}</select></label><button onClick={() => { setEmissionFilter("TODAS"); setClientFilter("TODOS"); setQuery(""); }}>Limpiar filtros</button></nav><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar pedido…"/></label></section><section className="panel data-panel"><SimpleOrders rows={visible} onDetail={openDetail}/></section>{detail && <div className="modal-bg order-dialog-bg" onMouseDown={e => { if (e.target === e.currentTarget) closeDetail(); }}><section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Detalle del pedido ${detail.ventaId}`} className="order-detail order-dialog" onMouseDown={e => e.stopPropagation()}><button className="close" onClick={closeDetail} aria-label="Cerrar detalle">×</button><h2>{detail.ventaId}</h2>{editing ? <div className="order-editor"><label>Cliente<input value={editClient} onChange={e => setEditClient(e.target.value)}/></label><label>Observaciones<textarea value={editObs} onChange={e => setEditObs(e.target.value)}/></label><h3>Materiales y cantidades</h3>{editItems.map((i, index) => <div className="order-edit-item" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo} · {money(i.precioUnitario)}</small></span><input aria-label={`Cantidad de ${i.nombre}`} type="number" min="0.01" step="0.01" value={i.cantidad} onChange={e => setEditItems(rows => rows.map((row, n) => n === index ? { ...row, cantidad: Number(e.target.value) } : row))}/><button onClick={() => setEditItems(rows => rows.filter((_, n) => n !== index))}>×</button></div>)}<div className="detail-total"><span>Nuevo total</span><strong>{money(editItems.reduce((sum, i) => sum + i.cantidad * i.precioUnitario, 0))}</strong></div><div className="order-actions"><button onClick={() => setEditing(false)}>Cancelar</button><button className="primary" disabled={savingEdit} onClick={saveEdit}>{savingEdit ? "Guardando…" : "Guardar cambios"}</button></div></div> : <><p>{detail.cliente} · {detail.fecha}</p><label>Estado operativo<select value={normalizeOperationalState(detail.estadoEntrega)} onChange={e => status(detail, e.target.value)}>{states.map(s => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}</select></label><div className={`emission-summary ${detail.codigoImpresion ? "emitted" : ""}`}><b>{detail.codigoImpresion ? "✓ Boleta emitida" : "Boleta no emitida"}</b>{detail.codigoImpresion && <small>{detail.codigoImpresion} · {detail.fechaImpresion}</small>}</div><div className="order-progress"><span className="done">Pedido creado ✓</span><span className={normalizeOperationalState(detail.estadoEntrega) !== "POR_COMPRAR" ? "done" : ""}>Preparación {normalizeOperationalState(detail.estadoEntrega) !== "POR_COMPRAR" ? "✓" : "○"}</span><span className={["LISTO_PARA_ENTREGA","ENTREGADO"].includes(normalizeOperationalState(detail.estadoEntrega)) ? "done" : ""}>Listo para entrega</span><span className={String(detail.estadoEntrega) === "EN_RUTA" || normalizeOperationalState(detail.estadoEntrega) === "ENTREGADO" ? "done" : ""}>En ruta</span><span className={normalizeOperationalState(detail.estadoEntrega) === "ENTREGADO" ? "done" : ""}>Entregado</span><span className={Number(detail.saldo || detail.total) <= .01 ? "done" : ""}>Cobrado</span></div>{normalizeOperationalState(detail.estadoEntrega) === "POR_COMPRAR" && <section className="preparation-control"><h3>Materiales a preparar</h3>{preparation.map((line,index) => <article key={line.codigo}><span><b>{line.producto}</b><small>{line.cantidadPedido} {line.presentacion} · Físico {line.stockFisico} · Reservado {line.stockReservado} · En ruta {line.stockEnRuta || 0} · Disponible {line.stockDisponible}</small></span><label>Preparado<input type="number" min="0" step=".01" value={line.cantidadPreparada || ""} onChange={e => updatePreparation(index,{cantidadPreparada:Number(e.target.value)})}/></label><select value={line.estadoLinea} onChange={e => updatePreparation(index,{estadoLinea:e.target.value as PreparationLine["estadoLinea"]})}><option>PENDIENTE</option><option>PREPARADO</option><option>FALTANTE</option><option>OBSERVADO</option></select>{line.estadoLinea === "FALTANTE" && <><input type="number" min="0" step=".01" value={line.cantidadFaltante || ""} onChange={e => updatePreparation(index,{cantidadFaltante:Number(e.target.value)})} placeholder="Cantidad faltante"/><input value={line.motivo} onChange={e => updatePreparation(index,{motivo:e.target.value})} placeholder="Motivo del faltante"/></>}</article>)}<div className="preparation-actions"><button onClick={() => savePreparation(false)} disabled={savingPreparation}>Guardar preparación</button><button className="primary" onClick={() => savePreparation(true)} disabled={savingPreparation || !preparation.length || preparation.some(line => line.estadoLinea !== "PREPARADO")}>Marcar listo para entrega</button></div></section>}{normalizeOperationalState(detail.estadoEntrega) === "LISTO_PARA_ENTREGA" && <button className="assign-journey-button" onClick={() => setAssignmentOpen(true)}>Asignar a jornada</button>}<h3>Materiales asociados</h3><div className="detail-items">{detail.items.map(i => <div className="detail-row" key={i.codigo}><span><b>{i.nombre}</b><small>{i.codigo}</small></span><span>{i.cantidad}</span><span>{money(i.precioUnitario)}</span><span><b>{money(i.subtotal)}</b></span></div>)}</div><div className="detail-total"><span>Total</span><strong>{money(detail.total)}</strong></div><div className="order-actions"><button onClick={() => startEdit(detail)}>✎ Editar pedido</button><button disabled={printing} onClick={() => printOrder(detail)}>{printing ? printStage : detail.codigoImpresion ? "Reimprimir boleta" : "Emitir e imprimir boleta"}</button></div></>}</section></div>}{assignmentOpen && detail && <div className="modal-bg route-modal-bg"><form className="modal assignment-modal" onSubmit={assignJourney}><button type="button" className="close" onClick={() => setAssignmentOpen(false)}>×</button><span className="eyebrow">ASIGNAR A JORNADA</span><h2>{detail.ventaId}</h2><label>Fecha<input type="date" required value={assignment.fecha} onChange={e => setAssignment({...assignment,fecha:e.target.value})}/></label><label>Repartidor<input required value={assignment.repartidor} onChange={e => setAssignment({...assignment,repartidor:e.target.value})}/></label><label>Vehículo<input required value={assignment.vehiculo} onChange={e => setAssignment({...assignment,vehiculo:e.target.value})}/></label><label>Ruta<input required value={assignment.ruta} onChange={e => setAssignment({...assignment,ruta:e.target.value})}/></label><label>Orden de visita<input type="number" min="1" value={assignment.ordenVisita} onChange={e => setAssignment({...assignment,ordenVisita:Number(e.target.value)})}/></label><button className="primary">Asignar y enviar a ruta</button></form></div>}</div>;
 }
 function Collections({ rows, clients, loading, load, call, notify }: {

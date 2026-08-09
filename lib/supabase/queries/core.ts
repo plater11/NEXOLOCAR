@@ -44,7 +44,7 @@ export async function productCatalog() {
 
 export async function orderCatalog(filters: Record<string, unknown> = {}) {
   const db = getSupabaseAdminClient();
-  let request = db.from("pedidos").select("id,codigo_pedido,cliente_id,fecha,total,observaciones,estado_operativo,estado_entrega,estado_cobranza,estado_boleta").order("fecha", { ascending: false });
+  let request = db.from("pedidos").select("id,codigo_pedido,cliente_id,fecha,total,observaciones,estado_operativo,estado_entrega,estado_cobranza,estado_boleta,subestado_operativo,motivo_incidencia,fecha_reprogramada,fecha_vencimiento_cobro").order("fecha", { ascending: false });
   const from = String(filters.fechaDesde || filters.desde || "").slice(0, 10);
   const to = String(filters.fechaHasta || filters.hasta || "").slice(0, 10);
   if (from) request = request.gte("fecha", `${from}T00:00:00-05:00`);
@@ -53,7 +53,7 @@ export async function orderCatalog(filters: Record<string, unknown> = {}) {
   if (orderError) throw orderError;
   const orderIds = (orders || []).map(order => order.id);
   const [{ data: clients, error: clientError }, { data: details, error: detailError }, { data: products, error: productError }] = await Promise.all([
-    db.from("clientes").select("id,nombre"),
+    db.from("clientes").select("id,nombre,telefono,direccion"),
     orderIds.length ? db.from("pedido_detalle").select("pedido_id,producto_id,cantidad_presentacion,precio_aplicado,subtotal").in("pedido_id", orderIds) : Promise.resolve({ data: [], error: null }),
     db.from("productos").select("id,codigo,nombre"),
   ]);
@@ -70,8 +70,9 @@ export async function orderCatalog(filters: Record<string, unknown> = {}) {
       const product = productMap.get(detail.producto_id);
       return { codigo: product?.codigo || "", nombre: product?.nombre || "Producto", cantidad: Number(detail.cantidad_presentacion), precioUnitario: Number(detail.precio_aplicado), subtotal: Number(detail.subtotal) };
     });
-    return { ...order, cliente: clientMap.get(order.cliente_id) || "Cliente", items };
-  }).filter(order => !text || `${order.codigo_pedido} ${order.cliente} ${order.observaciones || ""}`.toLowerCase().includes(text));
+    const client = (clients || []).find(row => row.id === order.cliente_id);
+    return { ...order, cliente: clientMap.get(order.cliente_id) || "Cliente", telefono: client?.telefono || "", direccion: client?.direccion || "", items };
+  }).filter(order => !text || `${order.codigo_pedido} ${order.cliente} ${order.telefono} ${order.observaciones || ""}`.toLowerCase().includes(text));
 }
 
 export async function operationalSummary() {
