@@ -1,5 +1,7 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { enqueueOperation, migrateLegacySaleQueue, synchronizeOperations } from "../lib/offline/queue";
+import { getSupabaseBrowserClient } from "../lib/supabase/client";
 import "./birthday.css";
 import "./sales-enhancements.css";
 import "./sales-fixes.css";
@@ -218,6 +220,18 @@ const collectionRendition = (rows: Order[]) => {
     };
 };
 const READ_ONLY = new Set(["obtenerSesion", "obtenerResumen", "obtenerCatalogoProductos", "obtenerClientes", "obtenerClientesPreventa", "obtenerStock", "obtenerEmisiones", "obtenerCobranzaPedidos", "obtenerGastosOperacion", "obtenerRendicionDia", "obtenerMovimientosIngreso", "obtenerHistorial", "obtenerCentroGerencial", "obtenerPlaneamientoMensual", "obtenerContabilidadDiaria", "obtenerCurvaS", "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "obtenerListas", "obtenerPreparacionPedido", "obtenerActividadReciente"]);
+const OFFLINE_MUTATIONS = new Set(["registrarVenta", "registrarCliente", "actualizarCliente", "registrarProducto", "actualizarProducto", "guardarPreparacionPedido", "asignarPedidoJornada", "guardarCobranzaPedido", "registrarGastoOperacion", "cerrarJornada", "registrarMovimiento", "registrarMovimientosMasivos"]);
+function offlineArgs(args: unknown[]) {
+    if (!args.length || typeof args[0] !== "object" || args[0] === null || Array.isArray(args[0])) return args;
+    const payload = args[0] as Record<string, unknown>;
+    return [{ ...payload, solicitudId: String(payload.solicitudId || crypto.randomUUID()) }, ...args.slice(1)];
+}
+function offlineResult(fn: string): unknown {
+    if (["registrarCliente", "actualizarCliente"].includes(fn)) return "Cliente guardado en el dispositivo. Se sincronizará al recuperar señal.";
+    if (["registrarProducto", "actualizarProducto"].includes(fn)) return "Producto guardado en el dispositivo. Se sincronizará al recuperar señal.";
+    if (["guardarPreparacionPedido", "asignarPedidoJornada", "cerrarJornada"].includes(fn)) return { ok: true, mensaje: "Guardado en el dispositivo. Se sincronizará al recuperar señal.", offline: true };
+    return "Guardado en el dispositivo. Se sincronizará al recuperar señal.";
+}
 async function measured<T>(label: string, action: () => Promise<T>): Promise<T> { const started = performance.now(); try { return await action(); } finally { if (process.env.NODE_ENV !== "production") console.info(`[PERF] ${label}: ${Math.round(performance.now() - started)}ms`); } }
 async function api<T>(fn: string, args: unknown[] = [], token = ""): Promise<T> {
     const response = await fetch("/api/qaso", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fn, args, token }) });
@@ -280,12 +294,26 @@ export default function Home() {
         if (visible)
             setPending(n => n + 1);
         try {
+            if (!navigator.onLine && OFFLINE_MUTATIONS.has(fn)) {
+                const queuedArgs = offlineArgs(args);
+                const id = String((queuedArgs[0] as Record<string, unknown>)?.solicitudId || crypto.randomUUID());
+                await enqueueOperation(fn, queuedArgs, id);
+                window.dispatchEvent(new CustomEvent("nexo:activity"));
+                return offlineResult(fn) as T;
+            }
             const result = await api<T>(fn, args, session?.token || "");
             if (visible) window.dispatchEvent(new CustomEvent("nexo:activity"));
             return result;
         }
         catch (error) {
-            const message = error instanceof Error ? error.message : "No se pudo consultar Google Sheets.";
+            const message = error instanceof Error ? error.message : "No se pudo consultar NexoVenta.";
+            if (OFFLINE_MUTATIONS.has(fn) && /fetch|network|conexi[oó]n|timeout|tiempo de espera|failed/i.test(message)) {
+                const queuedArgs = offlineArgs(args);
+                const id = String((queuedArgs[0] as Record<string, unknown>)?.solicitudId || crypto.randomUUID());
+                await enqueueOperation(fn, queuedArgs, id);
+                notify("Cobertura inestable: operación guardada en el dispositivo.");
+                return offlineResult(fn) as T;
+            }
             if (/sesi[oó]n expirada|vuelva a iniciar|ingrese usuario/i.test(message)) {
                 localStorage.removeItem("nexoventa_session");
                 setSession(null);
@@ -297,7 +325,7 @@ export default function Home() {
             if (visible)
                 setPending(n => Math.max(0, n - 1));
         }
-    }, [session]);
+    }, [notify, session]);
     const refreshClients = useCallback(async () => {
         if (!session || !navigator.onLine)
             return;
@@ -379,29 +407,9 @@ export default function Home() {
     const syncQueue = useCallback(async () => {
         if (!session || !navigator.onLine)
             return;
-        const queue = cacheGet<Array<{
-            id: string;
-            payload: unknown;
-        }>>("nexo_sale_queue", []);
-        if (!queue.length)
-            return;
-        const pending = [];
-        for (const item of queue) {
-            try {
-                const r = await call<{
-                    ok: boolean;
-                    mensaje: string;
-                }>("registrarVenta", [item.payload]);
-                if (!r.ok)
-                    throw new Error(r.mensaje);
-            }
-            catch {
-                pending.push(item);
-            }
-        }
-        cacheSet("nexo_sale_queue", pending);
-        if (pending.length !== queue.length)
-            notify(`${queue.length - pending.length} preventa(s) sincronizadas`);
+        const outcome = await synchronizeOperations((fn, args) => call(fn, args));
+        if (outcome.synced) notify(`${outcome.synced} operación(es) sincronizadas`);
+        if (outcome.conflicts) notify(`${outcome.conflicts} operación(es) requieren revisión`);
     }, [call, notify, session]);
     useEffect(() => {
         const saved = cacheGet<Session | null>("nexoventa_session", null);
@@ -424,6 +432,7 @@ export default function Home() {
         window.addEventListener("offline", state);
         if ("serviceWorker" in navigator)
             navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+        void migrateLegacySaleQueue();
         return () => { window.removeEventListener("online", state); window.removeEventListener("offline", state); };
     }, []);
     useEffect(() => {
@@ -462,6 +471,25 @@ export default function Home() {
         if (online && session)
             queueMicrotask(() => void syncQueue().then(refresh));
     }, [online, refresh, session, syncQueue]);
+    useEffect(() => {
+        if (!online || !session?.token || !dataSourceLabel.includes("SUPABASE")) return;
+        const db = getSupabaseBrowserClient();
+        db.realtime.setAuth(session.token);
+        let refreshTimer = 0;
+        const scheduleRefresh = () => {
+            window.clearTimeout(refreshTimer);
+            refreshTimer = window.setTimeout(() => void refresh(), 350);
+        };
+        const channel = db.channel("nexoventa-operation")
+            .on("postgres_changes", { event: "*", schema: "public", table: "clientes" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "productos" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "stock_actual" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "pedidos" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "pagos" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "jornadas" }, scheduleRefresh)
+            .subscribe();
+        return () => { window.clearTimeout(refreshTimer); void db.removeChannel(channel); };
+    }, [dataSourceLabel, online, refresh, session?.token]);
     useEffect(() => {
         if (!session || canViewModule(session, active))
             return;
@@ -571,16 +599,14 @@ function Clients({ clients, call, refresh, notify, online }: {
         e.preventDefault();
         if (saving)
             return;
-        if (!online)
-            return notify("Para registrar clientes se requiere señal; las preventas sí funcionan offline.");
         const norm = (x: string) => x.trim().toLowerCase().replace(/\s+/g, " ");
         if (!form.id && clients.some(c => norm(c.nombre) === norm(form.nombre) && norm(c.apellidos) === norm(form.apellidos) && norm(c.contacto) === norm(form.contacto) && norm(c.direccion) === norm(form.direccion)))
             return notify("Este cliente ya existe. No se enviará otro registro.");
         setSaving(true);
-        notify("Guardando cliente y sincronizando datos…");
+        notify(online ? "Guardando cliente…" : "Guardando cliente en el dispositivo…");
         try {
             const fn = form.id ? "actualizarCliente" : "registrarCliente";
-            const r = await call<string>(fn, [{ ...form }]);
+            const r = await call<string>(fn, [{ ...form, solicitudId: crypto.randomUUID() }]);
             notify(r);
             setOpen(false);
             setForm(blank);
@@ -710,16 +736,11 @@ function Sales({ products, clients, call, refreshProducts, notify, online }: {
         const total = cart.reduce((a, i) => a + i.cantidad * i.precioVenta, 0);
         const completedClient = client;
         const completedAt = new Date();
-        const payload = { cliente: client, items: cart.map(i => ({ codigo: i.codigo, productoId: i.codigo, presentacionId: `${i.codigo}-${i.factor}`, cantidad: i.unidadesSueltas, cantidadEntera: i.cantidadEntera ?? Math.floor(i.cantidad), cantidadPresentacion: i.cantidad, cantidadPresentacionTotal: i.cantidad, factorPresentacion: i.factor, cantidadUnidadesBase: i.unidadesSueltas, fraccion: i.fraccion || 0, nombrePresentacion: i.nombrePresentacion || i.unidad || "Unidad", precioPresentacion: i.precioVenta, precioFraccionado: i.precioVenta * (i.fraccion || 0), precioAplicado: i.cantidad * i.precioVenta, subtotal: i.cantidad * i.precioVenta })), observaciones: obs, solicitudId: crypto.randomUUID() };
+        const payload = { cliente: client, clienteId: selectedClient?.id || "", items: cart.map(i => ({ codigo: i.codigo, productoId: i.codigo, presentacionId: `${i.codigo}-${i.factor}`, cantidad: i.unidadesSueltas, cantidadEntera: i.cantidadEntera ?? Math.floor(i.cantidad), cantidadPresentacion: i.cantidad, cantidadPresentacionTotal: i.cantidad, factorPresentacion: i.factor, cantidadUnidadesBase: i.unidadesSueltas, fraccion: i.fraccion || 0, nombrePresentacion: i.nombrePresentacion || i.unidad || "Unidad", precioPresentacion: i.precioVenta, precioFraccionado: i.precioVenta * (i.fraccion || 0), precioAplicado: i.cantidad * i.precioVenta, subtotal: i.cantidad * i.precioVenta })), observaciones: obs, solicitudId: crypto.randomUUID() };
         savingSaleRef.current = true;
         setSavingSale(true);
         if (!online) {
-            const q = cacheGet<Array<{
-                id: string;
-                payload: unknown;
-            }>>("nexo_sale_queue", []);
-            q.push({ id: payload.solicitudId, payload });
-            cacheSet("nexo_sale_queue", q);
+            await enqueueOperation("registrarVenta", [payload], payload.solicitudId);
             setSuccess({ ventaId: `PENDIENTE-${payload.solicitudId.slice(0, 8).toUpperCase()}`, total, cliente: completedClient, fecha: completedAt.toLocaleString("es-PE"), offline: true });
             clearCompletedSale();
             savingSaleRef.current = false;

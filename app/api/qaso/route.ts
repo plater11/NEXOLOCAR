@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
 import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, mirrorSaleMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_ORDER_MUTATIONS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
+import { createSupabaseUser, deleteSupabaseUser, listSupabaseUsers, loginSupabase, logoutSupabase, requireSupabaseSession, updateSupabaseUser, type UserPayload } from "../../../lib/supabase/auth";
+import { assignNativeJourney, closeNativeJourney, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativeRendition, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState } from "../../../lib/supabase/operations";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "obtenerCatalogoProductos",
   "obtenerClientes", "obtenerClientesPreventa", "registrarCliente", "limpiarClientesDuplicados", "actualizarCliente", "eliminarCliente",
-  "registrarVenta", "obtenerStock", "obtenerListas", "registrarProducto", "actualizarProducto", "registrarMovimiento",
+  "registrarVenta", "obtenerStock", "obtenerListas", "registrarProducto", "actualizarProducto", "eliminarProducto", "registrarMovimiento",
   "registrarMovimientosMasivos", "validarCargaMasivaInventario", "importarCargaMasivaInventario", "obtenerMovimientosIngreso", "obtenerHistorial",
   "obtenerEmisiones", "generarCodigoImpresion", "obtenerCobranzaPedidos", "guardarCobranzaPedido",
   "corregirPedido", "actualizarEstadoOperativoPedido", "obtenerHistorialEstadosPedido",
@@ -15,7 +17,7 @@ const ALLOWED = new Set([
   "registrarMovimientoFinanciero", "obtenerCentroGerencial", "guardarPlaneamientoMensual", "duplicarPlaneamientoMensualAnterior",
   "obtenerPlaneamientoMensual", "guardarContabilidadDiaria", "obtenerContabilidadDiaria", "obtenerCurvaS",
   "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "crearUsuarioSistema",
-  "actualizarUsuario", "validarIntegridad", "inicializarHojas", "repararFechasMovimientosVenta"
+  "actualizarUsuario", "eliminarUsuarioSistema", "validarIntegridad", "inicializarHojas", "repararFechasMovimientosVenta"
 ]);
 
 export async function GET() {
@@ -28,6 +30,64 @@ export async function POST(request: Request) {
     const body = await request.json() as { fn?: string; args?: unknown[]; token?: string };
     if (!body.fn || !ALLOWED.has(body.fn)) return NextResponse.json({ ok: false, message: "Operación no permitida." }, { status: 403 });
     const mode = dataSourceMode();
+    if (mode === "supabase" && isSupabaseConfigured()) {
+      try {
+        if (body.fn === "loginUsuario") return NextResponse.json({ ok: true, resultado: await loginSupabase(body.args?.[0], body.args?.[1]) });
+        if (body.fn === "obtenerSesion") return NextResponse.json({ ok: true, resultado: (await requireSupabaseSession(String(body.args?.[0] || body.token || ""))).session });
+        if (body.fn === "cerrarSesion") return NextResponse.json({ ok: true, resultado: await logoutSupabase(String(body.args?.[0] || body.token || "")) });
+        const current = await requireSupabaseSession(String(body.token || ""));
+        const profile = String(current.profile.perfil_legacy || current.profile.rol || "").toUpperCase();
+        if (body.fn === "obtenerUsuarios") return NextResponse.json({ ok: true, resultado: await listSupabaseUsers(String(body.token || "")) });
+        if (body.fn === "crearUsuarioSistema") return NextResponse.json({ ok: true, resultado: await createSupabaseUser(String(body.token || ""), (body.args?.[0] || {}) as UserPayload) });
+        if (body.fn === "actualizarUsuario") return NextResponse.json({ ok: true, resultado: await updateSupabaseUser(String(body.token || ""), (body.args?.[0] || {}) as UserPayload) });
+        if (body.fn === "eliminarUsuarioSistema") return NextResponse.json({ ok: true, resultado: await deleteSupabaseUser(String(body.token || ""), body.args?.[0]) });
+        if (["registrarCliente","actualizarCliente"].includes(body.fn)) return NextResponse.json({ok:true,resultado:await saveNativeClient((body.args?.[0]||{}) as Record<string,unknown>)});
+        if (body.fn === "eliminarCliente") return NextResponse.json({ok:true,resultado:await deleteNativeClient(body.args?.[0])});
+        if (["registrarProducto","actualizarProducto"].includes(body.fn)) return NextResponse.json({ok:true,resultado:await saveNativeProduct((body.args?.[0]||{}) as Record<string,unknown>)});
+        if (body.fn === "eliminarProducto") return NextResponse.json({ok:true,resultado:await deleteNativeProduct(body.args?.[0])});
+        if (body.fn === "registrarMovimiento") return NextResponse.json({ok:true,resultado:await registerNativeInventoryMovement(String(body.token||""),(body.args?.[0]||{}) as Record<string,unknown>)});
+        if (["registrarMovimientosMasivos","importarCargaMasivaInventario"].includes(body.fn)){const rows=Array.isArray(body.args?.[0])?body.args[0]:[];for(const row of rows)await registerNativeInventoryMovement(String(body.token||""),row as Record<string,unknown>);return NextResponse.json({ok:true,resultado:`${rows.length} movimiento(s) registrados correctamente.`});}
+        if (body.fn === "obtenerListas") return NextResponse.json({ok:true,resultado:await getNativeLists()});
+        if (["obtenerHistorial","obtenerMovimientosIngreso"].includes(body.fn)) return NextResponse.json({ok:true,resultado:await getNativeInventoryHistory()});
+        if(body.fn==="actualizarEstadoOperativoPedido")return NextResponse.json({ok:true,resultado:await updateNativeOrderState(current.user.id,(body.args?.[0]||{}) as Record<string,unknown>)});
+        if(body.fn==="obtenerHistorialEstadosPedido")return NextResponse.json({ok:true,resultado:await getNativeOrderHistory(body.args?.[0])});
+        if(body.fn==="generarCodigoImpresion")return NextResponse.json({ok:true,resultado:await issueNativePrintCode(body.args?.[0])});
+        if(body.fn==="corregirPedido")return NextResponse.json({ok:true,resultado:await correctNativeOrder(String(body.token||""),(body.args?.[0]||{}) as Record<string,unknown>)});
+        if(body.fn==="registrarMovimientoFinanciero")return NextResponse.json({ok:true,resultado:await saveNativeFinancialMovement(current.user.id,(body.args?.[0]||{}) as Record<string,unknown>)});
+        if(body.fn==="obtenerPlaneamientoMensual")return NextResponse.json({ok:true,resultado:await getNativePlan(body.args?.[0])});
+        if(body.fn==="guardarPlaneamientoMensual")return NextResponse.json({ok:true,resultado:await saveNativePlan((body.args?.[0]||{}) as Record<string,unknown>)});
+        if(body.fn==="duplicarPlaneamientoMensualAnterior")return NextResponse.json({ok:true,resultado:await duplicateNativePlan(body.args?.[0])});
+        if(body.fn==="obtenerContabilidadDiaria")return NextResponse.json({ok:true,resultado:await getNativeAccounting(body.args?.[0])});
+        if(body.fn==="guardarContabilidadDiaria")return NextResponse.json({ok:true,resultado:await saveNativeAccounting(current.user.id,(body.args?.[0]||{}) as Record<string,unknown>)});
+        if(body.fn==="obtenerAnalisis")return NextResponse.json({ok:true,resultado:await getNativeAnalysis(body.args?.[0])});
+        if(body.fn==="obtenerCurvaS")return NextResponse.json({ok:true,resultado:await getNativeCurve(body.args?.[0],body.args?.[1],body.args?.[2])});
+        if (body.fn === "registrarVenta") return NextResponse.json({ ok: true, resultado: await createNativeSale(String(body.token || ""), (body.args?.[0] || {}) as Parameters<typeof createNativeSale>[1]) });
+        if (body.fn === "obtenerPreparacionPedido") return NextResponse.json({ ok: true, resultado: await getNativePreparation(body.args?.[0]) });
+        if (body.fn === "guardarPreparacionPedido") return NextResponse.json({ ok: true, resultado: await saveNativePreparation(String(body.token || ""), (body.args?.[0] || {}) as Parameters<typeof saveNativePreparation>[1]) });
+        if (body.fn === "asignarPedidoJornada") return NextResponse.json({ ok: true, resultado: await assignNativeJourney(String(body.token || ""), current.user.id, (body.args?.[0] || {}) as Parameters<typeof assignNativeJourney>[2]) });
+        if (body.fn === "guardarCobranzaPedido") return NextResponse.json({ ok: true, resultado: await processNativeCollection(String(body.token || ""), (body.args?.[0] || {}) as Parameters<typeof processNativeCollection>[1]) });
+        if (body.fn === "obtenerCobranzaPedidos") return NextResponse.json({ ok: true, resultado: await getNativeCollections((body.args?.[0] || {}) as Record<string, unknown>) });
+        if (body.fn === "registrarGastoOperacion") return NextResponse.json({ ok: true, resultado: await registerNativeExpense(current.user.id, (body.args?.[0] || {}) as Parameters<typeof registerNativeExpense>[1]) });
+        if (body.fn === "obtenerGastosOperacion") return NextResponse.json({ ok: true, resultado: await getNativeExpenses(body.args?.[0]) });
+        if (body.fn === "obtenerGastosPendientes") {
+          if (!["MASTER", "ADMINISTRADOR", "FINANZAS"].includes(profile)) throw new Error("Esta operación requiere perfil administrador o finanzas.");
+          return NextResponse.json({ ok: true, resultado: await getNativeExpenses("*", true) });
+        }
+        if (body.fn === "resolverGastoOperacion") {
+          if (!["MASTER", "ADMINISTRADOR", "FINANZAS"].includes(profile)) throw new Error("Esta operación requiere perfil administrador o finanzas.");
+          return NextResponse.json({ ok: true, resultado: await resolveNativeExpense(current.user.id, (body.args?.[0] || {}) as Parameters<typeof resolveNativeExpense>[1]) });
+        }
+        if (body.fn === "obtenerResumenJornada") return NextResponse.json({ ok: true, resultado: await getNativeJourneySummary(body.args?.[0], current.user.id) });
+        if (body.fn === "cerrarJornada") return NextResponse.json({ ok: true, resultado: await closeNativeJourney(current.user.id, (body.args?.[0] || {}) as Parameters<typeof closeNativeJourney>[1]) });
+        if (body.fn === "obtenerRendicionDia") return NextResponse.json({ ok: true, resultado: await getNativeRendition(body.args?.[0], profile === "MASTER" || profile === "ADMINISTRADOR" ? undefined : current.user.id) });
+        if(body.fn==="validarCargaMasivaInventario"){const rows=Array.isArray(body.args?.[0])?body.args[0] as Array<Record<string,unknown>>:[],invalid=rows.filter(row=>!String(row.codigo||"").trim()||!(Number(row.cantidadCarga)>0));return NextResponse.json({ok:true,resultado:{ok:invalid.length===0,mensaje:invalid.length?`${invalid.length} fila(s) inválidas.`:`${rows.length} fila(s) listas para importar.`}});}
+        if(SUPABASE_COMPAT_READS.has(body.fn))return NextResponse.json({ok:true,resultado:await executeCompatRead(body.fn,body.args||[])});
+        return NextResponse.json({ok:false,code:"SUPABASE_OPERATION_NOT_IMPLEMENTED",message:`La operación ${body.fn} no forma parte del flujo Supabase habilitado.`},{status:501});
+      } catch (authError) {
+        const message = authError instanceof Error ? authError.message : "No se pudo validar la sesiÃ³n.";
+        return NextResponse.json({ ok: false, message }, { status: /sesi[oó]n|contrase|usuario/i.test(message) ? 401 : 403 });
+      }
+    }
     if (mode === "supabase" && SUPABASE_COMPAT_READS.has(body.fn)) {
       if (!isSupabaseConfigured()) return NextResponse.json({ ok: false, code: "SUPABASE_NOT_CONFIGURED", message: "Supabase no está configurado." }, { status: 503 });
       if (!SUPABASE_COMPAT_READS.has(body.fn)) return NextResponse.json({ ok: false, code: "SUPABASE_OPERATION_PENDING", message: `La operación ${body.fn} todavía no ha sido validada para el corte.` }, { status: 501 });
