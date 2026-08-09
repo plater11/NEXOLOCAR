@@ -7,6 +7,7 @@ export const SUPABASE_PRODUCT_MUTATIONS = new Set([
   "registrarProducto", "actualizarProducto", "eliminarProducto", "registrarMovimiento",
   "registrarMovimientosMasivos", "actualizarMovimientoIngreso", "eliminarMovimientoIngreso", "importarCargaMasivaInventario",
 ]);
+export const SUPABASE_ORDER_MUTATIONS = new Set(["registrarVenta"]);
 
 type LegacyClient = {
   id?: string;
@@ -42,6 +43,21 @@ type LegacyProduct = {
   stock?: number;
 };
 
+type LegacySaleItem = {
+  codigo?: string;
+  cantidad?: number;
+  cantidadPresentacion?: number;
+  cantidadUnidadesBase?: number;
+  factorPresentacion?: number;
+  fraccion?: number;
+  precioVenta?: number;
+  precioPresentacion?: number;
+  subtotal?: number;
+};
+
+type LegacySale = { cliente?: string; observaciones?: string; solicitudId?: string; items?: LegacySaleItem[] };
+type LegacySaleResult = { ok?: boolean; ventaId?: string; total?: number; fecha?: string; clienteId?: string };
+
 function normalized(value: unknown) {
   return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -52,6 +68,13 @@ function isoDate(value: unknown) {
   if (dayFirst) return `${dayFirst[3]}-${dayFirst[2].padStart(2, "0")}-${dayFirst[1].padStart(2, "0")}`;
   const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : null;
+}
+
+function isoDateTime(value: unknown) {
+  const raw = String(value ?? "").trim();
+  const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (!match) return new Date().toISOString();
+  return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}T${(match[4] || "00").padStart(2, "0")}:${match[5] || "00"}:00-05:00`;
 }
 
 function sameClient(left: LegacyClient, right: LegacyClient) {
@@ -196,6 +219,77 @@ export async function mirrorProductMutation(fn: string, args: unknown[], sheetPr
   if (presentationError) throw presentationError;
   if (stockError) throw stockError;
   return { operation: fn, products: productRows.length, presentations: presentationRows.length, stock: stockRows.length };
+}
+
+export async function mirrorSaleMutation(args: unknown[], result: LegacySaleResult, sheetClients: LegacyClient[]) {
+  if (!result.ok || !result.ventaId) throw new Error("Apps Script no confirmó la venta para sincronizarla.");
+  const db = getSupabaseAdminClient();
+  const sale = (args[0] || {}) as LegacySale;
+  const clientCode = String(result.clienteId || "").trim();
+  const sheetClient = sheetClients.find(client => String(client.id || "") === clientCode);
+  if (sheetClient) await mirrorClientMutation("actualizarCliente", [sheetClient]);
+
+  let clientRequest = db.from("clientes").select("id,codigo,nombre").limit(1);
+  clientRequest = clientCode
+    ? clientRequest.eq("codigo", clientCode)
+    : clientRequest.ilike("nombre", String(sale.cliente || "").trim());
+  const { data: clients, error: clientError } = await clientRequest;
+  if (clientError) throw clientError;
+  const clientId = clients?.[0]?.id;
+  if (!clientId) throw new Error("El cliente de la venta no existe en Supabase.");
+
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  const codes = [...new Set(items.map(item => String(item.codigo || "").trim().toUpperCase()).filter(Boolean))];
+  const { data: products, error: productError } = await db.from("productos").select("id,codigo").in("codigo", codes);
+  if (productError) throw productError;
+  const productIds = new Map((products || []).map(product => [product.codigo, product.id]));
+  if (productIds.size !== codes.length) throw new Error("Uno o más productos de la venta no existen en Supabase.");
+
+  const total = numeric(result.total);
+  const orderRow = {
+    codigo_pedido: result.ventaId,
+    cliente_id: clientId,
+    fecha: isoDateTime(result.fecha),
+    subtotal: total,
+    descuento: 0,
+    total,
+    estado_operativo: "POR_COMPRAR",
+    estado_entrega: "PENDIENTE",
+    estado_cobranza: "NO_APLICA",
+    estado_boleta: "NO_EMITIDA",
+    observaciones: String(sale.observaciones || "") || null,
+    legacy_id: result.ventaId,
+    idempotency_key: String(sale.solicitudId || `SHEETS:${result.ventaId}`),
+    updated_at: new Date().toISOString(),
+  };
+  const { data: order, error: orderError } = await db.from("pedidos").upsert(orderRow, { onConflict: "codigo_pedido" }).select("id").single();
+  if (orderError) throw orderError;
+
+  const details = items.map(item => {
+    const code = String(item.codigo || "").trim().toUpperCase();
+    const quantity = numeric(item.cantidadPresentacion ?? item.cantidad);
+    const factor = Math.max(numeric(item.factorPresentacion), 1);
+    const price = numeric(item.precioPresentacion ?? item.precioVenta);
+    return {
+      pedido_id: order.id,
+      producto_id: productIds.get(code) || "",
+      presentacion_id: null,
+      cantidad_presentacion: quantity,
+      fraccion: numeric(item.fraccion),
+      factor_presentacion: factor,
+      cantidad_unidades_base: numeric(item.cantidadUnidadesBase) || quantity * factor,
+      precio_presentacion: price,
+      precio_aplicado: price,
+      subtotal: numeric(item.subtotal) || quantity * price,
+      legacy_id: `${result.ventaId}:${code}`,
+    };
+  });
+  const { error: deleteError } = await db.from("pedido_detalle").delete().eq("pedido_id", order.id);
+  if (deleteError) throw deleteError;
+  const { error: detailsError } = await db.from("pedido_detalle").insert(details);
+  if (detailsError) throw detailsError;
+  await db.from("eventos").insert({ tipo: "NUEVO_PEDIDO", entidad: "PEDIDO", entidad_id: order.id, descripcion: "Pedido sincronizado desde Preventa", importe: total, metadata: { ventaId: result.ventaId } });
+  return { operation: "registrarVenta", orderId: order.id, code: result.ventaId, details: details.length };
 }
 
 export async function executeCompatRead(fn: string, args: unknown[]) {

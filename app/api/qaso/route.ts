@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
-import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
+import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, mirrorSaleMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_ORDER_MUTATIONS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "obtenerCatalogoProductos",
@@ -71,6 +71,24 @@ export async function POST(request: Request) {
           await mirrorProductMutation(body.fn, body.args || [], mirrorEnvelope.resultado);
         } catch (mirrorError) {
           console.error("[SUPABASE_PRODUCT_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
+        }
+      }
+      if (mode === "dual" && isSupabaseConfigured() && parsed.ok && SUPABASE_ORDER_MUTATIONS.has(body.fn)) {
+        try {
+          const saleResult = parsed.resultado as { ok?: boolean; ventaId?: string; total?: number; fecha?: string; clienteId?: string };
+          if (saleResult?.ok) {
+            const clientsResponse = await fetch(endpoint, {
+              method: "POST",
+              headers: { "content-type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({ fn: "obtenerClientes", args: [""], token: body.token || "" }),
+              redirect: "follow",
+            });
+            const clientsEnvelope = await clientsResponse.json() as { ok?: boolean; resultado?: Array<Record<string, string>> };
+            if (!clientsEnvelope.ok || !Array.isArray(clientsEnvelope.resultado)) throw new Error("No se pudo resolver el cliente de la venta.");
+            await mirrorSaleMutation(body.args || [], saleResult, clientsEnvelope.resultado);
+          }
+        } catch (mirrorError) {
+          console.error("[SUPABASE_ORDER_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
         }
       }
       if (mode === "dual" && isSupabaseConfigured() && SUPABASE_COMPAT_READS.has(body.fn) && parsed.ok) {
