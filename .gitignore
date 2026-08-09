@@ -12,3 +12,4 @@ scripts/migration/input/
 *.log
 .clasp.json
 .clasprc.json
+supabase/.temp/

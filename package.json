@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --ignore-pattern .next"
+    ,"migrate:export": "node scripts/migration/00-export-sheets.mjs"
     ,"migrate:clientes": "node scripts/migration/01-migrate-clientes.mjs"
     ,"migrate:productos": "node scripts/migration/02-migrate-productos.mjs"
     ,"migrate:pedidos": "node scripts/migration/03-migrate-pedidos.mjs"
