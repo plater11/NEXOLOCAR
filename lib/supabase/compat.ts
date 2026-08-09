@@ -1,7 +1,7 @@
-import { recentEvents, searchClients, searchProducts } from "./queries/core";
+import { operationalSummary, orderCatalog, productCatalog, recentEvents, searchClients } from "./queries/core";
 import { getSupabaseAdminClient } from "./server";
 
-export const SUPABASE_COMPAT_READS = new Set(["obtenerClientes", "obtenerClientesPreventa", "obtenerCatalogoProductos", "obtenerActividadReciente"]);
+export const SUPABASE_COMPAT_READS = new Set(["obtenerClientes", "obtenerClientesPreventa", "obtenerCatalogoProductos", "obtenerStock", "obtenerEmisiones", "obtenerResumen", "obtenerActividadReciente"]);
 export const SUPABASE_CLIENT_MUTATIONS = new Set(["registrarCliente", "actualizarCliente", "eliminarCliente"]);
 export const SUPABASE_PRODUCT_MUTATIONS = new Set([
   "registrarProducto", "actualizarProducto", "eliminarProducto", "registrarMovimiento",
@@ -298,8 +298,14 @@ export async function executeCompatRead(fn: string, args: unknown[]) {
     return rows.map(row => ({ id: row.codigo, nombre: row.nombre, apellidos: "", correo: row.correo || "", contacto: row.telefono || "", fechaCumpleanos: row.fecha_nacimiento || "", direccion: row.direccion || "", comentarios: row.observaciones || "", estado: row.estado }));
   }
   if (fn === "obtenerCatalogoProductos") {
-    const rows = await searchProducts(String(args[0] || ""), 1000);
-    return rows.map(row => ({ codigo: row.codigo, nombre: row.nombre, unidad: row.unidad_base, precioCosto: Number(row.costo_actual), precioVenta: Number(row.precio_venta), permiteFraccionamiento: row.permite_fraccionamiento ? "SI" : "NO", stock: 0 }));
+    const rows = await productCatalog();
+    return rows.map(row => ({ codigo: row.codigo, nombre: row.nombre, unidad: row.unidad_base, grupo: row.grupo, stockMin: Number(row.stock_min), precioCosto: Number(row.costo_actual), precioVenta: Number(row.precio_venta), imagen: row.imagen || "", promocionActiva: row.promocion_activa ? "SI" : "NO", cantidadPromo: Number(row.cantidad_promo), precioPromo: Number(row.precio_promo), descripcionPromo: row.descripcion_promo || "", nombrePresentacion: row.presentation?.nombre || row.unidad_base, factorPresentacion: Number(row.presentation?.factor || 1), precioPresentacion: Number(row.presentation?.precio || row.precio_venta), permiteFraccionamiento: row.permite_fraccionamiento ? "SI" : "NO", fraccionesPermitidas: (row.presentation?.fracciones_permitidas || []).join(","), controlaDecimales: row.controla_decimales ? "SI" : "NO", stock: Number(row.stock?.stock_fisico || 0) }));
+  }
+  if (fn === "obtenerStock") return executeCompatRead("obtenerCatalogoProductos", args);
+  if (fn === "obtenerResumen") return operationalSummary();
+  if (fn === "obtenerEmisiones") {
+    const rows = await orderCatalog((args[0] || {}) as Record<string, unknown>);
+    return rows.map(row => ({ ventaId: row.codigo_pedido, fecha: row.fecha, cliente: row.cliente, total: Number(row.total), itemsCount: row.items.reduce((sum, item) => sum + Number(item.cantidad), 0), lineas: row.items.length, observaciones: row.observaciones || "", estadoOperativo: row.estado_operativo, estadoEntrega: row.estado_entrega, estadoCobro: row.estado_cobranza, codigoImpresion: row.estado_boleta === "EMITIDA" ? "EMITIDA" : "", items: row.items }));
   }
   if (fn === "obtenerActividadReciente") {
     const rows = await recentEvents(Number(args[0]) || 15);
