@@ -577,7 +577,7 @@ function Clients({ clients, call, refresh, notify, online }: {
         if (!form.id && clients.some(c => norm(c.nombre) === norm(form.nombre) && norm(c.apellidos) === norm(form.apellidos) && norm(c.contacto) === norm(form.contacto) && norm(c.direccion) === norm(form.direccion)))
             return notify("Este cliente ya existe. No se enviará otro registro.");
         setSaving(true);
-        notify("Guardando cliente en Google Sheets…");
+        notify("Guardando cliente y sincronizando datos…");
         try {
             const fn = form.id ? "actualizarCliente" : "registrarCliente";
             const r = await call<string>(fn, [{ ...form }]);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
-import { compareResult, executeCompatRead, SUPABASE_COMPAT_READS } from "../../../lib/supabase/compat";
+import { compareResult, executeCompatRead, mirrorClientMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS } from "../../../lib/supabase/compat";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "obtenerCatalogoProductos",
@@ -39,6 +39,25 @@ export async function POST(request: Request) {
     clearTimeout(timer); const text = await response.text();
     try {
       const parsed = JSON.parse(text) as { ok?: boolean; resultado?: unknown };
+      if (mode === "dual" && isSupabaseConfigured() && parsed.ok && SUPABASE_CLIENT_MUTATIONS.has(body.fn)) {
+        try {
+          let sheetClients: Array<Record<string, string>> = [];
+          if (body.fn === "registrarCliente") {
+            const mirrorResponse = await fetch(endpoint, {
+              method: "POST",
+              headers: { "content-type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({ fn: "obtenerClientes", args: [""], token: body.token || "" }),
+              redirect: "follow",
+            });
+            const mirrorEnvelope = await mirrorResponse.json() as { ok?: boolean; resultado?: Array<Record<string, string>> };
+            if (!mirrorEnvelope.ok || !Array.isArray(mirrorEnvelope.resultado)) throw new Error("No se pudo recuperar el cliente creado.");
+            sheetClients = mirrorEnvelope.resultado;
+          }
+          await mirrorClientMutation(body.fn, body.args || [], sheetClients);
+        } catch (mirrorError) {
+          console.error("[SUPABASE_WRITE_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
+        }
+      }
       if (mode === "dual" && isSupabaseConfigured() && SUPABASE_COMPAT_READS.has(body.fn) && parsed.ok) {
         try { const supabase = await executeCompatRead(body.fn, body.args || []); const comparison = compareResult(body.fn, parsed.resultado, supabase); if (!comparison.matches) console.warn("[DATA_SOURCE_DIFF]", comparison); }
         catch (comparisonError) { console.warn("[DATA_SOURCE_COMPARE_ERROR]", body.fn, comparisonError instanceof Error ? comparisonError.message : comparisonError); }
