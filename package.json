@@ -16,6 +16,7 @@
     ,"migrate:pedidos": "node scripts/migration/03-migrate-pedidos.mjs"
     ,"migrate:inventario": "node scripts/migration/04-migrate-inventario.mjs"
     ,"migrate:compare": "node scripts/migration/compare-sources.mjs"
+    ,"migrate:auth": "node scripts/migration/05-bootstrap-supabase-auth.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.2",

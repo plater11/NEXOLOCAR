@@ -1,1 +1,1 @@
-{"name":"NexoVenta","short_name":"NexoVenta","start_url":"/","display":"standalone","background_color":"#f7f8fa","theme_color":"#19253a","icons":[]}
+{"name":"NexoVenta","short_name":"NexoVenta","description":"Operación comercial offline-first","start_url":"/","scope":"/","display":"standalone","orientation":"portrait-primary","background_color":"#f7f8fa","theme_color":"#19253a","icons":[{"src":"/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
