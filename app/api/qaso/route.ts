@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
-import { compareResult, executeCompatRead, mirrorClientMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS } from "../../../lib/supabase/compat";
+import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "obtenerCatalogoProductos",
@@ -56,6 +56,21 @@ export async function POST(request: Request) {
           await mirrorClientMutation(body.fn, body.args || [], sheetClients);
         } catch (mirrorError) {
           console.error("[SUPABASE_WRITE_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
+        }
+      }
+      if (mode === "dual" && isSupabaseConfigured() && parsed.ok && SUPABASE_PRODUCT_MUTATIONS.has(body.fn)) {
+        try {
+          const mirrorResponse = await fetch(endpoint, {
+            method: "POST",
+            headers: { "content-type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({ fn: "obtenerCatalogoProductos", args: [], token: body.token || "" }),
+            redirect: "follow",
+          });
+          const mirrorEnvelope = await mirrorResponse.json() as { ok?: boolean; resultado?: Array<Record<string, unknown>> };
+          if (!mirrorEnvelope.ok || !Array.isArray(mirrorEnvelope.resultado)) throw new Error("No se pudo recuperar el catálogo actualizado.");
+          await mirrorProductMutation(body.fn, body.args || [], mirrorEnvelope.resultado);
+        } catch (mirrorError) {
+          console.error("[SUPABASE_PRODUCT_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
         }
       }
       if (mode === "dual" && isSupabaseConfigured() && SUPABASE_COMPAT_READS.has(body.fn) && parsed.ok) {
