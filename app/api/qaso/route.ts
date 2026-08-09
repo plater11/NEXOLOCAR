@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const body = await request.json() as { fn?: string; args?: unknown[]; token?: string };
     if (!body.fn || !ALLOWED.has(body.fn)) return NextResponse.json({ ok: false, message: "Operación no permitida." }, { status: 403 });
     const mode = dataSourceMode();
-    if (mode === "supabase") {
+    if (mode === "supabase" && SUPABASE_COMPAT_READS.has(body.fn)) {
       if (!isSupabaseConfigured()) return NextResponse.json({ ok: false, code: "SUPABASE_NOT_CONFIGURED", message: "Supabase no está configurado." }, { status: 503 });
       if (!SUPABASE_COMPAT_READS.has(body.fn)) return NextResponse.json({ ok: false, code: "SUPABASE_OPERATION_PENDING", message: `La operación ${body.fn} todavía no ha sido validada para el corte.` }, { status: 501 });
       return NextResponse.json({ ok: true, resultado: await executeCompatRead(body.fn, body.args || []) });
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     clearTimeout(timer); const text = await response.text();
     try {
       const parsed = JSON.parse(text) as { ok?: boolean; resultado?: unknown };
-      if (mode === "dual" && isSupabaseConfigured() && parsed.ok && SUPABASE_CLIENT_MUTATIONS.has(body.fn)) {
+      if (mode !== "sheets" && isSupabaseConfigured() && parsed.ok && SUPABASE_CLIENT_MUTATIONS.has(body.fn)) {
         try {
           let sheetClients: Array<Record<string, string>> = [];
           if (body.fn === "registrarCliente") {
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
           console.error("[SUPABASE_WRITE_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
         }
       }
-      if (mode === "dual" && isSupabaseConfigured() && parsed.ok && SUPABASE_PRODUCT_MUTATIONS.has(body.fn)) {
+      if (mode !== "sheets" && isSupabaseConfigured() && parsed.ok && SUPABASE_PRODUCT_MUTATIONS.has(body.fn)) {
         try {
           const mirrorResponse = await fetch(endpoint, {
             method: "POST",
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
           console.error("[SUPABASE_PRODUCT_MIRROR_ERROR]", body.fn, mirrorError instanceof Error ? mirrorError.message : mirrorError);
         }
       }
-      if (mode === "dual" && isSupabaseConfigured() && parsed.ok && SUPABASE_ORDER_MUTATIONS.has(body.fn)) {
+      if (mode !== "sheets" && isSupabaseConfigured() && parsed.ok && SUPABASE_ORDER_MUTATIONS.has(body.fn)) {
         try {
           const saleResult = parsed.resultado as { ok?: boolean; ventaId?: string; total?: number; fecha?: string; clienteId?: string };
           if (saleResult?.ok) {
