@@ -24,7 +24,20 @@ export async function recentEvents(limit = 15) {
   const db = getSupabaseAdminClient();
   const { data, error } = await db.from("eventos").select("id,tipo,entidad,entidad_id,descripcion,importe,usuario_id,created_at,metadata").order("created_at", { ascending: false }).limit(Math.min(50, limit));
   if (error) throw error;
-  return data || [];
+  const events = data || [];
+  const orderIds = events.filter(row => row.entidad === "PEDIDO").map(row => row.entidad_id).filter((id): id is string => Boolean(id));
+  const [{ data: orders }] = await Promise.all([
+    orderIds.length ? db.from("pedidos").select("id,codigo_pedido,cliente_id,estado_operativo,estado_entrega,estado_cobranza").in("id", orderIds) : Promise.resolve({ data: [] }),
+  ]);
+  const orderMap = new Map((orders || []).map(row => [row.id, row]));
+  const orderClientIds = (orders || []).map(row => row.cliente_id).filter((id): id is string => Boolean(id));
+  const { data: clients } = orderClientIds.length ? await db.from("clientes").select("id,nombre,direccion,telefono").in("id", orderClientIds) : { data: [] };
+  const clientMap = new Map((clients || []).map(row => [row.id, row]));
+  return events.map(event => {
+    const order = orderMap.get(event.entidad_id || "");
+    const client = clientMap.get(order?.cliente_id || "");
+    return { ...event, comentario: event.descripcion, pedido: order?.codigo_pedido || "", cliente: client?.nombre || "", ubicacion: client?.direccion || "", telefono: client?.telefono || "", estado: order?.estado_cobranza || order?.estado_entrega || order?.estado_operativo || "" };
+  });
 }
 
 export async function productCatalog() {

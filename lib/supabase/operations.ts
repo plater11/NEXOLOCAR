@@ -55,16 +55,19 @@ export async function getNativePreparation(code: unknown) {
   ]);
   if (detailError || warehouseError) throw detailError || warehouseError;
   const productIds = (details || []).map(row => row.producto_id);
-  const [{ data: products }, { data: stock }, { data: prepared }, { data: reserves }] = await Promise.all([
+  const presentationIds = (details || []).map(row => row.presentacion_id).filter((id): id is string => Boolean(id));
+  const [{ data: products }, { data: stock }, { data: prepared }, { data: reserves }, { data: presentations }] = await Promise.all([
     admin.from("productos").select("id,codigo,nombre").in("id", productIds),
     admin.from("stock_actual").select("*").in("producto_id", productIds).eq("almacen_id", warehouses?.[0]?.id || ""),
     admin.from("preparacion_pedido").select("*").eq("pedido_id", order.id),
     admin.from("reservas_stock").select("*").eq("pedido_id", order.id),
+    presentationIds.length ? admin.from("presentaciones").select("id,nombre,factor").in("id", presentationIds) : Promise.resolve({ data: [], error: null }),
   ]);
   const pmap = new Map((products || []).map(row => [row.id, row]));
+  const presentationMap = new Map((presentations || []).map(row => [row.id, row]));
   return { ventaId: order.codigo_pedido, cliente: "", total: number(order.total), lineas: (details || []).map(detail => {
-    const product = pmap.get(detail.producto_id), currentStock = (stock || []).find(row => row.producto_id === detail.producto_id), prep = (prepared || []).find(row => row.producto_id === detail.producto_id), reserve = (reserves || []).find(row => row.producto_id === detail.producto_id && ["RESERVADA", "EN_RUTA"].includes(row.estado));
-    return { ventaId: order.codigo_pedido, codigo: product?.codigo || "", producto: product?.nombre || "Producto", cantidadPedido: number(detail.cantidad_presentacion), presentacion: "", unidadesBase: number(detail.cantidad_unidades_base), cantidadPreparada: number(prep?.cantidad_preparada), estadoLinea: prep?.estado || "PENDIENTE", cantidadFaltante: number(prep?.cantidad_faltante), motivo: prep?.motivo || "", observacion: prep?.observacion || "", estadoStock: reserve?.estado || "SIN RESERVA", stockFisico: number(currentStock?.stock_fisico), stockReservado: number(currentStock?.stock_reservado), stockEnRuta: number(currentStock?.stock_en_ruta), stockDisponible: number(currentStock?.stock_disponible), productoId: detail.producto_id };
+    const product = pmap.get(detail.producto_id), presentation = presentationMap.get(detail.presentacion_id || ""), currentStock = (stock || []).find(row => row.producto_id === detail.producto_id), prep = (prepared || []).find(row => row.producto_id === detail.producto_id), reserve = (reserves || []).find(row => row.producto_id === detail.producto_id && ["RESERVADA", "EN_RUTA"].includes(row.estado));
+    return { ventaId: order.codigo_pedido, codigo: product?.codigo || "", producto: product?.nombre || "Producto", cantidadPedido: number(detail.cantidad_presentacion), presentacion: presentation?.nombre || "Unidad", factorPresentacion: number(presentation?.factor || detail.factor_presentacion || 1), unidadesBase: number(detail.cantidad_unidades_base), precio: number(detail.precio_aplicado), subtotal: number(detail.subtotal), cantidadPreparada: number(prep?.cantidad_preparada), estadoLinea: prep?.estado || "PENDIENTE", cantidadFaltante: number(prep?.cantidad_faltante), motivo: prep?.motivo || "", observacion: prep?.observacion || "", estadoStock: reserve?.estado || "SIN RESERVA", stockFisico: number(currentStock?.stock_fisico), stockReservado: number(currentStock?.stock_reservado), stockEnRuta: number(currentStock?.stock_en_ruta), stockDisponible: number(currentStock?.stock_disponible), productoId: detail.producto_id };
   }) };
 }
 

@@ -309,7 +309,7 @@ export async function executeCompatRead(fn: string, args: unknown[]) {
   }
   if (fn === "obtenerActividadReciente") {
     const rows = await recentEvents(Number(args[0]) || 15);
-    return rows.map(row => ({ id: row.id, fecha: row.created_at, fechaOrden: new Date(row.created_at).getTime(), tipo: row.tipo, ventaId: row.entidad === "PEDIDO" ? row.entidad_id || "" : "", cliente: "", descripcion: row.descripcion, monto: Number(row.importe), usuario: row.usuario_id || "" }));
+    return rows.map(row => ({ id: row.id, fecha: row.created_at, fechaOrden: new Date(row.created_at).getTime(), tipo: row.tipo, entidad: row.entidad, entidadId: row.entidad_id || "", ventaId: row.pedido || (row.entidad === "PEDIDO" ? row.entidad_id || "" : ""), cliente: row.cliente || "", ubicacion: row.ubicacion || "", telefono: row.telefono || "", estado: row.estado || "", descripcion: row.comentario || row.descripcion, monto: Number(row.importe), usuario: row.usuario_id || "" }));
   }
   throw new Error(`La operación ${fn} todavía no está habilitada en Supabase.`);
 }
