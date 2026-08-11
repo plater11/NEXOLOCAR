@@ -86,6 +86,12 @@ export async function POST(request: Request) {
         if(SUPABASE_COMPAT_READS.has(body.fn))return NextResponse.json({ok:true,resultado:await executeCompatRead(body.fn,body.args||[])});
         return NextResponse.json({ok:false,code:"SUPABASE_OPERATION_NOT_IMPLEMENTED",message:`La operación ${body.fn} no forma parte del flujo Supabase habilitado.`},{status:501});
       } catch (authError) {
+        if (!(authError instanceof Error) && authError && typeof authError === "object") {
+          const failure = authError as Record<string, unknown>;
+          const message = [failure.message, failure.details, failure.hint, failure.code]
+            .find((value): value is string => typeof value === "string" && Boolean(value.trim()));
+          return NextResponse.json({ ok: false, message: message || "No se pudo completar la operación." }, { status: 400 });
+        }
         const message = authError instanceof Error ? authError.message : "No se pudo validar la sesiÃ³n.";
         return NextResponse.json({ ok: false, message }, { status: /sesi[oó]n|contrase|usuario/i.test(message) ? 401 : 403 });
       }
