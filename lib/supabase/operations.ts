@@ -123,7 +123,7 @@ export async function assignNativeJourney(token: string, userId: string, payload
 
 function deliveryState(value: unknown) {
   const state = String(value || "").toUpperCase().replace(/Ó/g, "O").replace(/Í/g, "I").replace(/\s+/g, "_");
-  const map: Record<string, string> = { ENTREGADO: "ENTREGA_COMPLETA", ENTREGA_COMPLETA: "ENTREGA_COMPLETA", ENTREGA_PARCIAL: "ENTREGA_PARCIAL", CLIENTE_AUSENTE: "CLIENTE_AUSENTE", REPROGRAMADO: "REPROGRAMADO", RECHAZADO: "RECHAZADO", DIRECCION_INCORRECTA: "DIRECCION_INCORRECTA" };
+  const map: Record<string, string> = { ENTREGADO: "ENTREGA_COMPLETA", ENTREGADO_SIN_PAGO: "ENTREGA_COMPLETA", ENTREGADO_SIN_COBRAR: "ENTREGA_COMPLETA", ENTREGA_COMPLETA: "ENTREGA_COMPLETA", ENTREGA_PARCIAL: "ENTREGA_PARCIAL", CLIENTE_AUSENTE: "CLIENTE_AUSENTE", REPROGRAMADO: "REPROGRAMADO", RECHAZADO: "RECHAZADO", DIRECCION_INCORRECTA: "DIRECCION_INCORRECTA" };
   return map[state] || "OTRO";
 }
 
