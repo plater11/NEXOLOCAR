@@ -90,6 +90,7 @@ type Order = {
     codigoImpresion?: string;
     fechaImpresion?: string;
     telefono?: string;
+    direccion?: string;
     subestadoOperativo?: string;
     motivoIncidencia?: string;
     fechaReprogramada?: string;
@@ -99,9 +100,13 @@ type Summary = {
     totalProductos: number;
     totalMovimientos: number;
     sinStock: number;
+    conStock?: number;
     stockBajo: number;
     cumpleanos: number;
     totalClientes: number;
+    rendicionesPendientes?: number;
+    entregadosHoy?: number;
+    importeEntregadoHoy?: number;
     valorTotalInventario: number;
 };
 type ApiRecord = { [key: string]: never };
@@ -554,22 +559,46 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
     const birthdayCount = birthdays.length;
     const todayCount = birthdays.filter(c => birthdayDays(c.fechaCumpleanos) === 0).length;
     const debts = receivables.filter(o => String(o.estadoEntrega).toUpperCase() === "ENTREGADO" && Number(o.saldo || 0) > .01).sort((a, b) => daysSince(b.fechaEntrega || b.fecha) - daysSince(a.fechaEntrega || a.fecha));
-    const urgent = debts.filter(o => daysSince(o.fechaEntrega || o.fecha) >= 4);
-    const pendingDebt = debts.filter(o => daysSince(o.fechaEntrega || o.fecha) <= 3);
-    const pendingDebtTotal = pendingDebt.reduce((sum, o) => sum + Number(o.saldo || 0), 0);
-    const urgentDebtTotal = urgent.reduce((sum, o) => sum + Number(o.saldo || 0), 0);
-    const dueToday = pendingDebt.filter(o => daysSince(o.fechaEntrega || o.fecha) === 3).reduce((sum, o) => sum + Number(o.saldo || 0), 0);
-    const dueTomorrow = pendingDebt.filter(o => daysSince(o.fechaEntrega || o.fecha) === 2).reduce((sum, o) => sum + Number(o.saldo || 0), 0);
     const debtTotal = debts.reduce((sum, o) => sum + Number(o.saldo || 0), 0);
+    const deliveredToday = { label: "ENTREGADOS HOY", state: "ENTREGADO", rows: [] as Order[], count: Number(summary?.entregadosHoy || 0), total: Number(summary?.importeEntregadoHoy || 0), todayOnly: true };
     const operationalCards = [
         { label: "POR COMPRAR", state: "POR_COMPRAR", rows: orders.filter(o => normalizeOperationalState(o.estadoOperativo || o.estadoEntrega) === "POR_COMPRAR") },
         { label: "LISTOS PARA ENTREGA", state: "LISTO_PARA_ENTREGA", rows: orders.filter(o => normalizeOperationalState(o.estadoOperativo || o.estadoEntrega) === "LISTO_PARA_ENTREGA") },
         { label: "EN RUTA", state: "EN_RUTA", rows: orders.filter(o => String(o.estadoEntrega || "").toUpperCase().replace(/\s+/g, "_") === "EN_RUTA") },
+        deliveredToday,
         { label: "OBSERVADOS", state: "OBSERVADO", rows: orders.filter(o => normalizeOperationalState(o.estadoOperativo || o.estadoEntrega) === "OBSERVADO") },
     ];
     const latestByClient = new Map<string, string>();
     orders.forEach(o => { const key = String(o.cliente || "").trim().toLowerCase(); const date = orderDate(o.fecha); if (key && date && (!latestByClient.get(key) || date > String(latestByClient.get(key)))) latestByClient.set(key, date); });
     const inactiveClients = clients.filter(c => { const key = `${c.nombre} ${c.apellidos}`.trim().toLowerCase(); const last = latestByClient.get(key); return !last || daysSince(last) >= 30; });
+    const reprogrammed = orders.filter(o => String(o.estadoEntrega || o.subestadoOperativo || "").toUpperCase().includes("REPROGRAM"));
+    const rejected = orders.filter(o => String(o.estadoEntrega || o.subestadoOperativo || "").toUpperCase().includes("RECHAZ"));
+    const routeOrders = orders.filter(o => String(o.estadoEntrega || "").toUpperCase().replace(/\s+/g, "_") === "EN_RUTA");
+    const buyingOrders = operationalCards[0].rows;
+    const readyOrders = operationalCards[1].rows;
+    const pluralOrders = (value: number) => `${value} ${value === 1 ? "pedido" : "pedidos"}`;
+    const openOrders = (state: string, issue = "", todayOnly = false) => { cacheSet("nexo_order_tab", state); cacheSet("nexo_order_date", todayOnly ? "HOY" : "15_DIAS"); cacheSet("nexo_order_issue", issue); onNavigate("Pedidos y emisiÃ³n"); };
+    const nextActions = [
+        buyingOrders.length > 0 && { icon: "ðŸ›’", label: `Comprar materiales para ${pluralOrders(buyingOrders.length)}`, run: () => openOrders("POR_COMPRAR") },
+        readyOrders.length > 0 && { icon: "ðŸ“¦", label: `Preparar ${pluralOrders(readyOrders.length)}`, run: () => openOrders("LISTO_PARA_ENTREGA") },
+        routeOrders.length > 0 && { icon: "ðŸšš", label: `Confirmar salida de ${pluralOrders(routeOrders.length)} en ruta`, run: () => openOrders("EN_RUTA") },
+        debts.length > 0 && { icon: "ðŸ’°", label: `Cobrar ${pluralOrders(debts.length)} pendientes`, run: () => openOrders("COBRANZA") },
+        reprogrammed.length > 0 && { icon: "ðŸ“„", label: `Revisar ${pluralOrders(reprogrammed.length)} reprogramados`, run: () => openOrders("OBSERVADO", "REPROGRAMADO") },
+        rejected.length > 0 && { icon: "âš ", label: `Resolver ${pluralOrders(rejected.length)} rechazados`, run: () => openOrders("OBSERVADO", "RECHAZADO") },
+        Number(summary?.rendicionesPendientes || 0) > 0 && { icon: "â›½", label: `Aprobar ${Number(summary?.rendicionesPendientes)} rendiciÃ³n${Number(summary?.rendicionesPendientes) === 1 ? "" : "es"} de gastos`, run: () => onNavigate("Centro de rendiciones") },
+        todayCount > 0 && { icon: "ðŸŽ‚", label: `Hoy cumplen ${todayCount} cliente${todayCount === 1 ? "" : "s"}`, run: () => { cacheSet("nexo_client_birthdays", true); onNavigate("Clientes"); } },
+    ].filter(Boolean) as Array<{ icon: string; label: string; run: () => void }>;
+    const activityState = (item: ActivityRecord) => {
+        const type = String(item.tipo || "").toUpperCase();
+        const mapped: Record<string, string> = { NUEVO_PEDIDO: "POR COMPRAR", LISTO_ENTREGA: "LISTO PARA ENTREGA", EN_RUTA: "EN RUTA", ENTREGADO_COBRADO: "COBRADO", ENTREGADO_SIN_PAGO: "POR COBRAR", ENTREGADO_SIN_COBRAR: "POR COBRAR", RECHAZADO: "RECHAZADO", REPROGRAMADO: "REPROGRAMADO", NUEVO_STOCK: "INGRESO DE STOCK", GASTO_REGISTRADO: "PENDIENTE DE APROBACIÓN" };
+        return mapped[type] || String(item.estado || "").replace(/_/g, " ") || "REGISTRADO";
+    };
+    const openActivity = (item: ActivityRecord) => {
+        if (item.ventaId) { cacheSet("nexo_focus_order", item.ventaId); openOrders(String(item.estado || "").includes("COBR") ? "COBRANZA" : normalizeOperationalState(item.estado || "POR_COMPRAR")); return; }
+        if (item.entidad === "GASTO") { onNavigate("Centro de rendiciones"); return; }
+        if (item.entidad === "CLIENTE") { onNavigate("Clientes"); return; }
+        onNavigate("Productos e inventario");
+    };
     const editGoal = () => {
         const value = window.prompt("Meta mensual de ventas (S/)", String(monthlyGoal));
         if (value === null) return;
@@ -585,12 +614,12 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
             <article className="goal-card"><span>Meta mensual</span><strong>{money(salesMonth)}</strong><div className="goal-progress"><i style={{ width: `${goalProgress}%` }}></i></div><small>{goalProgress.toFixed(0)}% de {money(monthlyGoal)} {!isPreventa && <button onClick={editGoal}>Editar</button>}</small></article>
             <article><span>Cobros pendientes</span><strong>{money(debtTotal)}</strong><small>{debts.length} cliente(s) por cobrar</small></article>
             <article><span>Ticket promedio</span><strong>{money(ticketAverage)}</strong><small>{monthOrders.length} ventas este mes</small></article>
-            <article className="inactive-card"><span>Clientes inactivos</span><strong>{inactiveClients.length}</strong><small>Sin compra en 30 días</small></article>
+            <article className="inactive-card"><span>Clientes sin compra +30 días</span><strong>{inactiveClients.length}</strong><small>Requieren seguimiento comercial</small></article>
         </section>
-        <div className="home-alerts"><button className={`birthday-alert ${birthdayCount ? "" : "birthday-empty"}`} onClick={() => setBirthdayOpen(true)}><span className="birthday-cake">🎂</span><div><small>{todayCount ? "¡CUMPLEAÑOS DE HOY!" : "CUMPLEAÑOS PRÓXIMOS"}</small><strong>{birthdayCount}</strong><p>{birthdays.length ? birthdays.slice(0, 3).map(c => `${c.nombre} ${c.apellidos}`.trim()).join(", ") : "0 cumpleaños próximos"}</p></div></button>{pendingDebt.length > 0 && <button className="receivable-alert pending" onClick={() => { cacheSet("nexo_route_tab", "PENDIENTES DE COBRO"); onNavigate("Centro de rendiciones"); }}><span>◷</span><div><small>COBRANZA PENDIENTE</small><strong>{money(pendingDebtTotal)}</strong><p>{pendingDebt.length} pedido(s) · Hoy {money(dueToday)} · Mañana {money(dueTomorrow)}</p></div></button>}{urgent.length > 0 && <button className="receivable-alert urgent" onClick={() => { cacheSet("nexo_route_tab", "COBRANZA URGENTE"); onNavigate("Centro de rendiciones"); }}><span>⚠</span><div><small>COBRANZA URGENTE</small><strong>{money(urgentDebtTotal)}</strong><p>{urgent.length} pedido(s) vencido(s) · Mayor atraso {Math.max(...urgent.map(o => daysSince(o.fechaEntrega || o.fecha) - 3))} día(s)</p></div></button>}</div>
-        <section className="operational-home-grid">{operationalCards.map(card => <button key={card.state} onClick={() => { cacheSet("nexo_order_tab", card.state); onNavigate("Pedidos y emisión"); }}><small>{card.label}</small><strong>{card.rows.length} pedidos</strong><span>{money(card.rows.reduce((sum, order) => sum + Number(order.total || 0), 0))}</span></button>)}</section>
-        {!isPreventa && <section className="manager-secondary-metrics"><article><p>Clientes registrados</p><strong>{summary?.totalClientes || clients.length}</strong><small>{inactiveClients.length} requieren seguimiento</small></article><article><p>Productos</p><strong>{summary?.totalProductos || 0}</strong><small>{summary?.stockBajo || 0} con stock bajo</small></article><article><p>Valor de inventario</p><strong>{money(summary?.valorTotalInventario)}</strong><small>{summary?.sinStock || 0} sin stock</small></article></section>}
-        <section className="panel recent-activity"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Actividad transversal del ERP en tiempo real</p></div></div><div>{activities.slice(0, 15).map(item => <button className="activity-row" key={item.id} onClick={() => { if (item.ventaId) { cacheSet("nexo_focus_order", item.ventaId); onNavigate("Pedidos y emisión"); } else if (item.entidad === "GASTO") onNavigate("Centro de rendiciones"); else onNavigate("Productos e inventario"); }}><time>{new Date(item.fecha).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</time><span><b>{item.tipo.replace(/_/g," ")}</b><small>{item.cliente || "Operación del ERP"}{item.ubicacion ? ` · ${item.ubicacion}` : ""}</small><em>{item.descripcion}</em></span>{item.monto > 0 && <strong>{money(item.monto)}</strong>}<i>{item.estado?.replace(/_/g," ")}</i></button>)}{!activities.length && <p className="empty-activity">Aún no existen operaciones registradas en el historial transversal.</p>}</div></section>
+        <div className="home-control-grid"><button className={`birthday-alert ${birthdayCount ? "" : "birthday-empty"}`} onClick={() => setBirthdayOpen(true)}><span className="birthday-cake">🎂</span><div><small>{todayCount ? "¡CUMPLEAÑOS DE HOY!" : "CUMPLEAÑOS PRÓXIMOS"}</small><strong>{birthdayCount}</strong><p>{birthdays.length ? birthdays.slice(0, 3).map(c => `${c.nombre} ${c.apellidos}`.trim()).join(", ") : "0 cumpleaños próximos"}</p></div></button><section className="next-actions"><header><small>CENTRO DE CONTROL DIARIO</small><h3>Próximas acciones</h3></header>{nextActions.length ? <div>{nextActions.map(action => <button key={action.label} onClick={action.run}><span>{action.icon}</span><b>{action.label}</b><i>›</i></button>)}</div> : <div className="operation-current"><strong>✅ OPERACIÓN AL DÍA</strong><p>No existen tareas pendientes.</p></div>}</section></div>
+        <section className="operational-home-grid">{operationalCards.map(card => { const count = "count" in card ? card.count : card.rows.length; const total = "total" in card ? card.total : card.rows.reduce((sum, order) => sum + Number(order.total || 0), 0); return <button key={card.state} onClick={() => openOrders(card.state, "", "todayOnly" in card && Boolean(card.todayOnly))}><small>{card.label}</small><strong>{pluralOrders(count)}</strong><span>{money(total)}</span></button>; })}</section>
+        {!isPreventa && <section className="manager-secondary-metrics"><article><p>Clientes registrados</p><strong>{summary?.totalClientes || clients.length}</strong><small>{inactiveClients.length} sin compra +30 días</small></article><article><p>Productos</p><strong>{summary?.totalProductos || 0}</strong><small>{summary?.stockBajo || 0} con stock bajo</small></article><article><p>Valor de inventario</p><strong>{money(summary?.valorTotalInventario)}</strong><small>{summary?.conStock || 0} con stock · {summary?.sinStock || 0} sin stock</small></article></section>}
+        <section className="panel recent-activity"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Actividad transversal del ERP en tiempo real</p></div></div><div>{activities.slice(0, 15).map(item => <button className="activity-row" key={item.id} onClick={() => openActivity(item)}><time>{new Date(item.fecha).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</time><span><b>{item.tipo.replace(/_/g," ")}</b><small>{item.cliente || "Operación del ERP"}{item.ubicacion ? ` · ${item.ubicacion}` : ""}</small><em>{item.descripcion || "Sin comentario"}</em></span>{item.monto > 0 && <strong>{money(item.monto)}</strong>}<i>{activityState(item)}</i></button>)}{!activities.length && <p className="empty-activity">Aún no existen operaciones registradas en el historial transversal.</p>}</div></section>
         {birthdayOpen && <div className="modal-bg" onMouseDown={event => { if (event.target === event.currentTarget) setBirthdayOpen(false); }}><section className="birthday-list-modal" role="dialog" aria-modal="true" aria-label="Cumpleaños próximos" onMouseDown={event => event.stopPropagation()}><header><div><small>PRÓXIMOS 20 DÍAS</small><h2>Cumpleaños próximos</h2></div><button onClick={() => setBirthdayOpen(false)}>×</button></header><div>{birthdays.map(client => <article key={client.id}><span><b>{client.nombre} {client.apellidos}</b><small>{client.contacto || "Sin teléfono"}</small></span><strong>{birthdayDays(client.fechaCumpleanos) === 0 ? "Hoy" : `En ${birthdayDays(client.fechaCumpleanos)} día(s)`}</strong></article>)}{!birthdays.length && <p>0 cumpleaños próximos.</p>}</div></section></div>}
     </div>;
 }
@@ -606,8 +635,9 @@ function Clients({ clients, call, refresh, notify, online }: {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const deferredQuery = useDeferredValue(query);
+    const [birthdayOnly] = useState(() => { const active = cacheGet<boolean>("nexo_client_birthdays", false); localStorage.removeItem("nexo_client_birthdays"); return active; });
     const [saving, setSaving] = useState(false);
-    const visible = useMemo(() => { const term = deferredQuery.trim().toLowerCase(); return clients.filter(c => !term || `${c.id} ${c.nombre} ${c.apellidos} ${c.contacto} ${c.direccion}`.toLowerCase().includes(term)); }, [clients, deferredQuery]);
+    const visible = useMemo(() => { const term = deferredQuery.trim().toLowerCase(); return clients.filter(c => (!birthdayOnly || (birthdayDays(c.fechaCumpleanos) >= 0 && birthdayDays(c.fechaCumpleanos) <= 20)) && (!term || `${c.id} ${c.nombre} ${c.apellidos} ${c.contacto} ${c.direccion}`.toLowerCase().includes(term))); }, [clients, deferredQuery, birthdayOnly]);
     async function save(e: FormEvent) {
         e.preventDefault();
         if (saving)
@@ -826,7 +856,8 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     const [orderTab, setOrderTab] = useState(() => cacheGet<string>("nexo_order_tab", "POR_COMPRAR"));
     const [emissionFilter, setEmissionFilter] = useState<"TODAS" | "EMITIDA" | "NO_EMITIDA">("TODAS");
     const [clientFilter, setClientFilter] = useState("TODOS");
-    const [dateFilter, setDateFilter] = useState("HOY");
+    const [dateFilter, setDateFilter] = useState(() => cacheGet<string>("nexo_order_date", "HOY"));
+    const [issueFilter, setIssueFilter] = useState(() => cacheGet<string>("nexo_order_issue", ""));
     const [dateFrom, setDateFrom] = useState(today());
     const [dateTo, setDateTo] = useState(today());
     const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
@@ -844,9 +875,9 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     const [editClient, setEditClient] = useState("");
     const [editObs, setEditObs] = useState("");
     const [editItems, setEditItems] = useState<Array<{ codigo: string; nombre: string; cantidad: number; precioUnitario: number }>>([]);
-    const states = ["POR_COMPRAR", "LISTO_PARA_ENTREGA", "ENTREGADO", "OBSERVADO", "COBRANZA"];
+    const states = ["POR_COMPRAR", "LISTO_PARA_ENTREGA", "EN_RUTA", "ENTREGADO", "OBSERVADO", "COBRANZA"];
     const uniqueOrders = useMemo(() => dedupeOrders(orders), [orders]);
-    const stateOf = (o: Order) => normalizeOperationalState(o.estadoOperativo || o.estadoEntrega);
+    const stateOf = (o: Order) => { const delivery = String(o.estadoEntrega || "").toUpperCase().replace(/\s+/g, "_"); if (delivery === "EN_RUTA") return "EN_RUTA"; if (delivery.startsWith("ENTREGA_")) return "ENTREGADO"; return normalizeOperationalState(o.estadoOperativo || o.estadoEntrega); };
     const receivableOrders = uniqueOrders.filter(o => Number(o.saldo || 0) > .01 && String(o.estadoEntrega || "").toUpperCase().includes("ENTREG"));
     const counts = Object.fromEntries(states.map(state => [state, state === "COBRANZA" ? receivableOrders.length : uniqueOrders.filter(o => stateOf(o) === state).length]));
     const emittedCount = uniqueOrders.filter(o => Boolean(o.codigoImpresion)).length;
@@ -860,7 +891,7 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
         const iso = (date: Date) => date.toISOString().slice(0, 10);
         return dateFilter === "PERSONALIZADO" ? { from: dateFrom, to: dateTo } : { from: iso(start), to: iso(end) };
     }, [dateFilter, dateFrom, dateTo]);
-    const visible = uniqueOrders.filter(o => { const orderDate = new Date(o.fecha).toISOString().slice(0,10); const matchesState = orderTab === "COBRANZA" ? receivableOrders.some(row => row.ventaId === o.ventaId) : stateOf(o) === orderTab; return matchesState && orderDate >= range.from && orderDate <= range.to && (emissionFilter === "TODAS" || (emissionFilter === "EMITIDA" ? Boolean(o.codigoImpresion) : !o.codigoImpresion)) && (clientFilter === "TODOS" || o.cliente === clientFilter) && JSON.stringify(o).toLowerCase().includes(query.toLowerCase()); });
+    const visible = uniqueOrders.filter(o => { const orderDate = new Date(orderTab === "ENTREGADO" && o.fechaEntrega ? o.fechaEntrega : o.fecha).toISOString().slice(0,10); const matchesState = orderTab === "COBRANZA" ? receivableOrders.some(row => row.ventaId === o.ventaId) : stateOf(o) === orderTab; const issueText = `${o.estadoEntrega || ""} ${o.subestadoOperativo || ""} ${o.motivoIncidencia || ""}`.toUpperCase(); return matchesState && (!issueFilter || issueText.includes(issueFilter)) && orderDate >= range.from && orderDate <= range.to && (emissionFilter === "TODAS" || (emissionFilter === "EMITIDA" ? Boolean(o.codigoImpresion) : !o.codigoImpresion)) && (clientFilter === "TODOS" || o.cliente === clientFilter) && JSON.stringify(o).toLowerCase().includes(query.toLowerCase()); });
     const recentVisible = visible.slice(0, 15);
     const allPageSize = 25;
     const allPageCount = Math.max(1, Math.ceil(visible.length / allPageSize));
@@ -1035,8 +1066,8 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     const allPrepared = preparation.length > 0 && preparation.every(line => line.estadoLinea === "PREPARADO");
     return <div className="orders-page orders-flow-v2">
         <Heading eyebrow="OPERACIÓN Y DESPACHO" title="Pedidos y emisión" text="Compra, picking, despacho, entrega y cobranza sobre el mismo pedido."/>
-        <nav className="order-state-tabs">{states.map(state => <button key={state} className={orderTab === state ? "active" : ""} onClick={() => { setOrderTab(state); cacheSet("nexo_order_tab", state); setSelectedOrders(new Set()); }}><span>{state.replace(/_/g," ")}</span><b>{counts[state]}</b></button>)}</nav>
-        <section className="order-period-tools"><label>Periodo<select value={dateFilter} onChange={e => setDateFilter(e.target.value)}><option value="HOY">Hoy</option><option value="7_DIAS">Últimos 7 días</option><option value="15_DIAS">Últimos 15 días</option><option value="ESTE_MES">Este mes</option><option value="MES_ANTERIOR">Mes anterior</option><option value="PERSONALIZADO">Personalizado</option></select></label>{dateFilter === "PERSONALIZADO" && <><label>Desde<input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}/></label><label>Hasta<input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}/></label></>}<label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar pedido, boleta, cliente, teléfono o ubicación..."/></label><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos</option>{orderClients.map(client => <option key={client}>{client}</option>)}</select></label></section>
+        <nav className="order-state-tabs">{states.map(state => <button key={state} className={orderTab === state ? "active" : ""} onClick={() => { setOrderTab(state); setIssueFilter(""); cacheSet("nexo_order_tab", state); cacheSet("nexo_order_issue", ""); setSelectedOrders(new Set()); }}><span>{state.replace(/_/g," ")}</span><b>{counts[state]}</b></button>)}</nav>
+        <section className="order-period-tools"><label>Periodo<select value={dateFilter} onChange={e => { setDateFilter(e.target.value); cacheSet("nexo_order_date", e.target.value); }}><option value="HOY">Hoy</option><option value="7_DIAS">Últimos 7 días</option><option value="15_DIAS">Últimos 15 días</option><option value="ESTE_MES">Este mes</option><option value="MES_ANTERIOR">Mes anterior</option><option value="PERSONALIZADO">Personalizado</option></select></label>{dateFilter === "PERSONALIZADO" && <><label>Desde<input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}/></label><label>Hasta<input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}/></label></>}<label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar pedido, boleta, cliente, teléfono o ubicación..."/></label><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos</option>{orderClients.map(client => <option key={client}>{client}</option>)}</select></label>{issueFilter && <button className="active" onClick={() => { setIssueFilter(""); cacheSet("nexo_order_issue", ""); }}>Filtro: {issueFilter} ×</button>}</section>
         {visible.length > 0 && <section className="bulk-order-bar"><label><input type="checkbox" checked={visible.every(order => selectedOrders.has(order.ventaId))} onChange={toggleVisible}/> Seleccionar todos los visibles</label><b>{selectedOrders.size} seleccionados</b>{orderTab === "POR_COMPRAR" && <button disabled={bulkBusy} onClick={downloadConsolidation}>Descargar consolidado Excel</button>}{orderTab === "LISTO_PARA_ENTREGA" && <button className="primary" disabled={bulkBusy || !selectedOrders.size} onClick={() => bulkAction("EN_RUTA")}>Enviar a ruta</button>}</section>}
         {orderTab === "COBRANZA" && <section className="collection-kpis order-collection-kpis"><button><small>VENTAS ENTREGADAS</small><strong>{money(uniqueOrders.filter(order => String(order.estadoEntrega).toUpperCase().includes("ENTREG")).reduce((sum,order) => sum + Number(order.total || 0),0))}</strong></button><button><small>COBRADO HOY</small><strong>{money(uniqueOrders.filter(order => String(order.fechaEntrega || order.fecha).slice(0,10) === today()).reduce((sum,order) => sum + Number(order.totalCobrado || 0),0))}</strong></button><button><small>POR COBRAR</small><strong>{money(receivableOrders.reduce((sum,order) => sum + Number(order.saldo || 0),0))}</strong><span>{receivableOrders.length} pedidos</span></button><button className="urgent"><small>COBRANZA URGENTE</small><strong>{money(receivableOrders.filter(order => daysSince(order.fechaVencimientoCobro || order.fechaEntrega || order.fecha) > 0).reduce((sum,order) => sum + Number(order.saldo || 0),0))}</strong><span>{receivableOrders.filter(order => daysSince(order.fechaVencimientoCobro || order.fechaEntrega || order.fecha) > 0).length} vencidos</span></button></section>}
         <section className="panel order-card-list">{recentVisible.map(order => <article key={order.ventaId} className="selectable-order"><input type="checkbox" checked={selectedOrders.has(order.ventaId)} onChange={e => toggleOrder(order,e.target.checked)}/><button className="order-card-main" onClick={() => openDetail(order)}><span><b>{order.ventaId}</b><small>{order.cliente} · {order.telefono || "Sin teléfono"}</small></span><span><small>{order.fecha}</small><b>{money(order.total)}</b></span><em>{stateOf(order).replace(/_/g," ")}</em></button></article>)}{!visible.length && <p className="empty-state">No hay pedidos para los filtros seleccionados.</p>}</section>

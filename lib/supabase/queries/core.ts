@@ -65,18 +65,22 @@ export async function orderCatalog(filters: Record<string, unknown> = {}) {
   const { data: orders, error: orderError } = await request;
   if (orderError) throw orderError;
   const orderIds = (orders || []).map(order => order.id);
-  const [{ data: clients, error: clientError }, { data: details, error: detailError }, { data: products, error: productError }] = await Promise.all([
+  const [{ data: clients, error: clientError }, { data: details, error: detailError }, { data: products, error: productError }, { data: deliveries, error: deliveryError }] = await Promise.all([
     db.from("clientes").select("id,nombre,telefono,direccion"),
     orderIds.length ? db.from("pedido_detalle").select("pedido_id,producto_id,cantidad_presentacion,precio_aplicado,subtotal").in("pedido_id", orderIds) : Promise.resolve({ data: [], error: null }),
     db.from("productos").select("id,codigo,nombre"),
+    orderIds.length ? db.from("entregas").select("pedido_id,fecha_entrega,estado").in("pedido_id", orderIds).order("fecha_entrega", { ascending: false }) : Promise.resolve({ data: [], error: null }),
   ]);
   if (clientError) throw clientError;
   if (detailError) throw detailError;
   if (productError) throw productError;
+  if (deliveryError) throw deliveryError;
   const clientMap = new Map((clients || []).map(client => [client.id, client.nombre]));
   const productMap = new Map((products || []).map(product => [product.id, product]));
   const detailsMap = new Map<string, typeof details>();
+  const deliveryMap = new Map<string, { fecha_entrega: string | null; estado: string }>();
   for (const detail of details || []) detailsMap.set(detail.pedido_id, [...(detailsMap.get(detail.pedido_id) || []), detail]);
+  for (const delivery of deliveries || []) if (!deliveryMap.has(delivery.pedido_id)) deliveryMap.set(delivery.pedido_id, delivery);
   const text = String(filters.texto || "").trim().toLowerCase();
   return (orders || []).map(order => {
     const items = (detailsMap.get(order.id) || []).map(detail => {
@@ -84,28 +88,42 @@ export async function orderCatalog(filters: Record<string, unknown> = {}) {
       return { codigo: product?.codigo || "", nombre: product?.nombre || "Producto", cantidad: Number(detail.cantidad_presentacion), precioUnitario: Number(detail.precio_aplicado), subtotal: Number(detail.subtotal) };
     });
     const client = (clients || []).find(row => row.id === order.cliente_id);
-    return { ...order, cliente: clientMap.get(order.cliente_id) || "Cliente", telefono: client?.telefono || "", direccion: client?.direccion || "", items };
+    const delivery = deliveryMap.get(order.id);
+    return { ...order, cliente: clientMap.get(order.cliente_id) || "Cliente", telefono: client?.telefono || "", direccion: client?.direccion || "", fecha_entrega: delivery?.fecha_entrega || "", estado_entrega: delivery?.estado || order.estado_entrega, items };
   }).filter(order => !text || `${order.codigo_pedido} ${order.cliente} ${order.telefono} ${order.observaciones || ""}`.toLowerCase().includes(text));
 }
 
 export async function operationalSummary() {
   const db = getSupabaseAdminClient();
-  const [{ count: clients, error: clientError }, { data: products, error: productError }, { data: stock, error: stockError }] = await Promise.all([
+  const [{ count: clients, error: clientError }, { data: products, error: productError }, { data: stock, error: stockError }, { count: pendingExpenses, error: expenseError }] = await Promise.all([
     db.from("clientes").select("id", { count: "exact", head: true }).eq("estado", "ACTIVO"),
     db.from("productos").select("id,costo_actual,stock_min").eq("activo", true),
     db.from("stock_actual").select("producto_id,stock_fisico"),
+    db.from("gastos").select("id", { count: "exact", head: true }).eq("estado", "PENDIENTE_APROBACION"),
   ]);
   if (clientError) throw clientError;
   if (productError) throw productError;
   if (stockError) throw stockError;
+  if (expenseError) throw expenseError;
   const stockMap = new Map((stock || []).map(row => [row.producto_id, Number(row.stock_fisico)]));
+  const withStock = (products || []).filter(product => (stockMap.get(product.id) || 0) > 0).length;
+  const limaDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const { data: deliveries, error: deliveryError } = await db.from("entregas").select("pedido_id").in("estado", ["ENTREGA_COMPLETA", "ENTREGA_PARCIAL"]).gte("fecha_entrega", `${limaDay}T00:00:00-05:00`).lte("fecha_entrega", `${limaDay}T23:59:59-05:00`);
+  if (deliveryError) throw deliveryError;
+  const deliveredIds = [...new Set((deliveries || []).map(row => row.pedido_id))];
+  const deliveredResult = deliveredIds.length ? await db.from("pedidos").select("id,total").in("id", deliveredIds) : { data: [], error: null };
+  if (deliveredResult.error) throw deliveredResult.error;
   return {
     totalProductos: products?.length || 0,
     totalMovimientos: 0,
     sinStock: (products || []).filter(product => (stockMap.get(product.id) || 0) <= 0).length,
+    conStock: withStock,
     stockBajo: (products || []).filter(product => (stockMap.get(product.id) || 0) <= Number(product.stock_min)).length,
     cumpleanos: 0,
     totalClientes: clients || 0,
+    rendicionesPendientes: pendingExpenses || 0,
+    entregadosHoy: deliveredResult.data?.length || 0,
+    importeEntregadoHoy: (deliveredResult.data || []).reduce((sum, order) => sum + Number(order.total || 0), 0),
     valorTotalInventario: (products || []).reduce((sum, product) => sum + (stockMap.get(product.id) || 0) * Number(product.costo_actual), 0),
   };
 }
