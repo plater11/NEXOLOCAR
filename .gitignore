@@ -13,3 +13,5 @@ scripts/migration/input/
 .clasp.json
 .clasprc.json
 supabase/.temp/
+.vercel
+.env*
