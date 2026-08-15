@@ -1,5 +1,6 @@
 -- Global ERP synchronization and retry safety.
 set timezone = 'America/Lima';
+alter database postgres set timezone to 'America/Lima';
 
 create unique index if not exists gastos_idempotency_key_uidx
   on public.gastos (idempotency_key) where idempotency_key is not null;
