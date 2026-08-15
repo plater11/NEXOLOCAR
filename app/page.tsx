@@ -129,7 +129,7 @@ type Summary = {
     periodo?: { periodo: string; estado: string; cierreAnterior: null | { periodo: string; fecha: string; usuario: string } };
 };
 type ApiRecord = { [key: string]: never };
-type BulkStockRow = { filaExcel: number; codigo: string; presentacion: string; cantidad: number; nuevoCosto: number | null; observacion: string };
+type BulkStockRow = { filaExcel: number; codigo: string; presentacion: string; nombreCorregido: string; cantidad: number; nuevoCosto: number | null; observacion: string };
 type BulkStockPreview = { filaExcel: number; codigo: string; producto: string; presentacion: string; factor: number; cantidad: number; stockActual: number; stockNuevo: number; costoActual: number; nuevoCosto: number | null };
 type BulkStockValidation = { ok: boolean; filas: BulkStockPreview[]; errores: Array<{ fila: number; mensaje: string }>; resumen: { productos: number; filas: number; cantidadPresentaciones: number; valorEstimado: number }; mensaje: string };
 type StockBatch = { loteId: string; codigoLote: string; fecha: string; estado: string; productos: number; cantidad: number; valor: number; motivoReversion?: string };
@@ -1453,10 +1453,11 @@ function Inventory({ products, call, refresh, notify, master }: {
         try {
             const data = await call<Array<{ codigo: string; producto: string; presentacion: string; factor: number; stockPresentacion: number; costoActual: number }>>("obtenerPlantillaCargaMasiva");
             const XLSX = await import("xlsx"), workbook = XLSX.utils.book_new();
-            const rows = data.map(row => ({ "Código": row.codigo, "Producto": row.producto, "Presentación": row.presentacion, "Factor": row.factor, "Stock actual": row.stockPresentacion, "Cantidad a ingresar": "", "Costo unitario actual": row.costoActual, "Nuevo costo unitario": "", "Observación": "" }));
-            const sheet = XLSX.utils.json_to_sheet(rows); sheet["!cols"] = [{ wch: 14 }, { wch: 38 }, { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 22 }, { wch: 22 }, { wch: 40 }];
+            const rows = data.map(row => ({ "Código": row.codigo, "Producto actual": row.producto, "Nombre corregido": "", "Presentación": row.presentacion, "Factor": row.factor, "Stock actual": row.stockPresentacion, "Cantidad a ingresar": "", "Costo unitario actual": row.costoActual, "Nuevo costo unitario": "", "Observación": "" }));
+            const sheet = XLSX.utils.json_to_sheet(rows); sheet["!cols"] = [{ wch: 14 }, { wch: 38 }, { wch: 38 }, { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 22 }, { wch: 22 }, { wch: 40 }];
+            sheet["!autofilter"] = { ref: sheet["!ref"] || "A1:J1" };
             XLSX.utils.book_append_sheet(workbook, sheet, "Carga de stock");
-            XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["INSTRUCCIONES"], ["Completa únicamente Cantidad a ingresar, Nuevo costo unitario y Observación."], ["La cantidad suma existencias; nunca reemplaza el stock actual."], ["Deja vacío o en cero lo que no deseas importar. No uses cantidades negativas."], ["No cambies códigos, presentaciones ni factores. Si el catálogo cambió, descarga otra plantilla."]]), "Instrucciones");
+            XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["INSTRUCCIONES"], ["Completa Cantidad a ingresar, Nuevo costo unitario y Observación."], ["Si Producto actual dice SIN NOMBRE, completa Nombre corregido; se actualizará al importar."], ["La cantidad a ingresar se suma al stock actual."], ["Deja vacío o en cero lo que no deseas importar. No uses cantidades negativas."], ["No cambies códigos, presentaciones ni factores. Si el catálogo cambió, descarga otra plantilla."]]), "Instrucciones");
             XLSX.writeFile(workbook, `plantilla-stock-${today()}.xlsx`);
         } catch (x) { notify(x instanceof Error ? x.message : "No se pudo generar la plantilla"); }
         finally { setBulkBusy(false); }
@@ -1468,7 +1469,7 @@ function Inventory({ products, call, refresh, notify, master }: {
         try {
             const XLSX = await import("xlsx"), workbook = XLSX.read(await file.arrayBuffer(), { type: "array" }), sheet = workbook.Sheets[workbook.SheetNames[0]];
             const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" }), clean = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-            const rows: BulkStockRow[] = raw.map((row, i) => { const normalized = new Map(Object.entries(row).map(([key, value]) => [clean(key), value])); return { filaExcel: i + 2, codigo: String(normalized.get("codigo") || ""), presentacion: String(normalized.get("presentacion") || ""), cantidad: Number(normalized.get("cantidad a ingresar") || 0), nuevoCosto: normalized.get("nuevo costo unitario") === "" ? null : Number(normalized.get("nuevo costo unitario")), observacion: String(normalized.get("observacion") || "") }; });
+            const rows: BulkStockRow[] = raw.map((row, i) => { const normalized = new Map(Object.entries(row).map(([key, value]) => [clean(key), value])); return { filaExcel: i + 2, codigo: String(normalized.get("codigo") || ""), presentacion: String(normalized.get("presentacion") || ""), nombreCorregido: String(normalized.get("nombre corregido") || ""), cantidad: Number(normalized.get("cantidad a ingresar") || 0), nuevoCosto: normalized.get("nuevo costo unitario") === "" ? null : Number(normalized.get("nuevo costo unitario")), observacion: String(normalized.get("observacion") || "") }; });
             setBulkRows(rows); setBulkCheck(await call<BulkStockValidation>("validarCargaMasivaInventario", [rows]));
         }
         catch (x) {

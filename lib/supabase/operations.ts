@@ -171,7 +171,9 @@ export async function registerNativeInventoryMovement(token:string,payload:Entit
 export async function getNativeLists(){const db=getSupabaseAdminClient();const[{data:products,error},{data:categories}]=await Promise.all([db.from("productos").select("unidad_base,grupo").eq("activo",true),db.from("categorias").select("nombre").eq("activo",true)]);if(error)throw error;return{unidades:[...new Set((products||[]).map(r=>r.unidad_base).filter(Boolean))].sort(),grupos:[...new Set([...(products||[]).map(r=>r.grupo),...(categories||[]).map(r=>r.nombre)].filter(Boolean))].sort()};}
 export async function getNativeInventoryHistory(){const db=getSupabaseAdminClient();const{data:movements,error}=await db.from("movimientos_inventario").select("*").order("created_at",{ascending:false}).limit(500);if(error)throw error;const ids=[...new Set((movements||[]).map(r=>r.producto_id))],{data:products}=await db.from("productos").select("id,codigo,nombre").in("id",ids.length?ids:[crypto.randomUUID()]);const map=new Map((products||[]).map(r=>[r.id,r]));return(movements||[]).map(r=>({fecha:r.created_at,codigo:map.get(r.producto_id)?.codigo||"",producto:map.get(r.producto_id)?.nombre||"Producto",tipo:r.tipo_movimiento,cantidad:number(r.cantidad),saldoAnterior:number(r.saldo_anterior),saldoNuevo:number(r.saldo_nuevo),observaciones:r.observacion||""}));}
 
-type BulkStockRow = { filaExcel?: number; codigo?: string; presentacion?: string; cantidad?: number; nuevoCosto?: number | null; observacion?: string };
+type BulkStockRow = { filaExcel?: number; codigo?: string; presentacion?: string; nombreCorregido?: string; cantidad?: number; nuevoCosto?: number | null; observacion?: string };
+
+const compareProductCodes = (left: string, right: string) => left.localeCompare(right, "es", { numeric: true, sensitivity: "base" });
 
 export async function getNativeBulkStockTemplate() {
   const db = getSupabaseAdminClient();
@@ -187,7 +189,8 @@ export async function getNativeBulkStockTemplate() {
     const product = productMap.get(row.producto_id); if (!product) return null;
     const factor = Math.max(number(row.factor), 0.0001);
     return { codigo: product.codigo, producto: product.nombre, presentacion: row.nombre, factor, stockActual: stockMap.get(product.id) || 0, stockPresentacion: (stockMap.get(product.id) || 0) / factor, costoActual: number(product.costo_actual) * factor, permiteFraccionamiento: Boolean(row.permite_fraccionamiento) };
-  }).filter(Boolean);
+  }).filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .sort((left, right) => compareProductCodes(String(left.codigo), String(right.codigo)) || String(left.presentacion).localeCompare(String(right.presentacion), "es"));
 }
 
 export async function validateNativeBulkStock(rows: BulkStockRow[]) {
@@ -204,11 +207,12 @@ export async function validateNativeBulkStock(rows: BulkStockRow[]) {
   const errors: Array<{ fila: number; mensaje: string }> = [], seen = new Set<string>(), normalized: Array<Record<string, unknown>> = [];
   for (const source of rows) {
     const fila = number(source.filaExcel) || 2, codigo = String(source.codigo || "").trim().toUpperCase(), presentationName = String(source.presentacion || "").trim();
-    const quantity = number(source.cantidad), newCost = source.nuevoCosto === null || source.nuevoCosto === undefined || source.nuevoCosto === 0 ? null : number(source.nuevoCosto);
+    const quantity = number(source.cantidad), newCost = source.nuevoCosto === null || source.nuevoCosto === undefined || source.nuevoCosto === 0 ? null : number(source.nuevoCosto), correctedName = String(source.nombreCorregido || "").trim();
     if (!codigo && !presentationName && quantity === 0 && newCost === null && !String(source.observacion || "").trim()) continue;
     if (quantity === 0) continue;
     const product = productByCode.get(codigo);
     if (!product) { errors.push({ fila, mensaje: `Código ${codigo || "vacío"} no existe o está inactivo.` }); continue; }
+    if (String(product.nombre).trim().toUpperCase() === "SIN NOMBRE" && !correctedName) { errors.push({ fila, mensaje: `Completa Nombre corregido para ${codigo}.` }); continue; }
     const presentation = presentationByKey.get(`${product.id}|${presentationName.toUpperCase()}`);
     if (!presentation) { errors.push({ fila, mensaje: `Presentación “${presentationName || "vacía"}” no existe para ${codigo}.` }); continue; }
     const key = `${product.id}|${presentation.id}`;
@@ -217,7 +221,8 @@ export async function validateNativeBulkStock(rows: BulkStockRow[]) {
     if (!presentation.permite_fraccionamiento && !Number.isInteger(quantity)) { errors.push({ fila, mensaje: `${presentationName} requiere una cantidad entera.` }); continue; }
     if (newCost !== null && newCost <= 0) { errors.push({ fila, mensaje: "El nuevo costo debe ser mayor que cero." }); continue; }
     const factor = number(presentation.factor), currentBase = stockByProduct.get(product.id) || 0;
-    normalized.push({ filaExcel: fila, productoId: product.id, presentacionId: presentation.id, codigo, producto: product.nombre, presentacion: presentation.nombre, factor, cantidad: quantity, cantidadBase: quantity * factor, stockActual: currentBase / factor, stockNuevo: currentBase / factor + quantity, costoActual: number(product.costo_actual) * factor, nuevoCosto: newCost, observacion: String(source.observacion || "").trim(), permiteFraccionamiento: Boolean(presentation.permite_fraccionamiento) });
+    if (correctedName && (correctedName.length < 2 || correctedName.toUpperCase() === "SIN NOMBRE")) { errors.push({ fila, mensaje: "El nombre corregido no es válido." }); continue; }
+    normalized.push({ filaExcel: fila, productoId: product.id, presentacionId: presentation.id, codigo, producto: correctedName || product.nombre, nombreCorregido: correctedName, presentacion: presentation.nombre, factor, cantidad: quantity, cantidadBase: quantity * factor, stockActual: currentBase / factor, stockNuevo: currentBase / factor + quantity, costoActual: number(product.costo_actual) * factor, nuevoCosto: newCost, observacion: String(source.observacion || "").trim(), permiteFraccionamiento: Boolean(presentation.permite_fraccionamiento) });
   }
   const costByProduct = new Map<string, number>();
   for (const row of normalized) if (number(row.nuevoCosto) > 0) {
@@ -234,7 +239,13 @@ export async function importNativeBulkStock(userId: string, rows: BulkStockRow[]
   const validation = await validateNativeBulkStock(rows); if (!validation.ok) return validation;
   const items = validation.filas.map(row => ({ filaExcel: row.filaExcel, productoId: row.productoId, presentacionId: row.presentacionId, factor: row.factor, cantidad: row.cantidad, nuevoCosto: row.nuevoCosto || "", observacion: row.observacion }));
   const { data, error } = await getSupabaseAdminClient().rpc("procesar_carga_masiva_stock", { p_items: items, p_usuario_id: userId, p_idempotency_key: requestId });
-  if (error) throw error; return { ...(data as Record<string, unknown>), mensaje: `Lote ${(data as Record<string, unknown>)?.codigoLote || ""} importado correctamente.` };
+  if (error) throw error;
+  const nameUpdates = validation.filas.filter(row => String(row.nombreCorregido || "").trim());
+  for (const row of nameUpdates) {
+    const { error: nameError } = await getSupabaseAdminClient().from("productos").update({ nombre: String(row.nombreCorregido).trim(), updated_at: new Date().toISOString() }).eq("id", String(row.productoId));
+    if (nameError) throw nameError;
+  }
+  return { ...(data as Record<string, unknown>), mensaje: `Lote ${(data as Record<string, unknown>)?.codigoLote || ""} importado correctamente.` };
 }
 
 export async function getNativeStockBatches() {
