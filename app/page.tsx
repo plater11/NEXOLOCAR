@@ -559,6 +559,12 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
     const [monthlyGoal, setMonthlyGoal] = useState(() => cacheGet<number>("nexo_monthly_goal", 20000));
     const goalProgress = monthlyGoal > 0 ? Math.min(100, (salesMonth / monthlyGoal) * 100) : 0;
     const [birthdayOpen, setBirthdayOpen] = useState(false);
+    if (!summary) return <div className="manager-home home-loading" aria-busy="true" aria-label="Cargando resumen operativo">
+        <div className="home-skeleton skeleton-heading"></div>
+        <section className="executive-metrics skeleton-grid">{Array.from({ length: 5 }, (_, index) => <article className="home-skeleton" key={index}></article>)}</section>
+        <section className="home-control-grid"><div className="home-skeleton skeleton-feature"></div><div className="home-skeleton skeleton-feature"></div></section>
+        <section className="operational-home-grid skeleton-grid">{Array.from({ length: 5 }, (_, index) => <div className="home-skeleton skeleton-operation" key={index}></div>)}</section>
+    </div>;
     const birthdays = clients.filter(c => String(c.estado || "ACTIVO").toUpperCase() !== "INACTIVO" && Boolean(c.fechaCumpleanos) && birthdayDays(c.fechaCumpleanos) >= 0 && birthdayDays(c.fechaCumpleanos) <= 20).sort((a, b) => birthdayDays(a.fechaCumpleanos) - birthdayDays(b.fechaCumpleanos));
     const birthdayCount = birthdays.length;
     const todayCount = birthdays.filter(c => birthdayDays(c.fechaCumpleanos) === 0).length;
