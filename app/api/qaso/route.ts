@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
 import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, mirrorSaleMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_ORDER_MUTATIONS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
 import { createSupabaseUser, deleteSupabaseUser, listSupabaseUsers, loginSupabase, logoutSupabase, requireSupabaseSession, updateSupabaseUser, type UserPayload } from "../../../lib/supabase/auth";
-import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeBulkStockTemplate, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, getNativeStockBatches, importNativeBulkStock, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, revertNativeStockBatch, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState, validateNativeBulkStock } from "../../../lib/supabase/operations";
+import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, closeNativeOperationalPeriod, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeBulkStockTemplate, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, getNativeStockBatches, importNativeBulkStock, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, revertNativeStockBatch, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState, validateNativeBulkStock } from "../../../lib/supabase/operations";
 
 const ALLOWED = new Set([
-  "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "obtenerCatalogoProductos",
+  "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "cerrarPeriodoOperativo", "obtenerCatalogoProductos",
   "obtenerClientes", "obtenerClientesPreventa", "registrarCliente", "limpiarClientesDuplicados", "actualizarCliente", "eliminarCliente",
   "registrarVenta", "obtenerStock", "obtenerListas", "registrarProducto", "actualizarProducto", "eliminarProducto", "registrarMovimiento",
   "registrarMovimientosMasivos", "validarCargaMasivaInventario", "importarCargaMasivaInventario", "obtenerPlantillaCargaMasiva", "obtenerLotesStock", "revertirCargaMasivaStock", "obtenerMovimientosIngreso", "obtenerHistorial",
@@ -37,6 +37,10 @@ export async function POST(request: Request) {
         if (body.fn === "cerrarSesion") return NextResponse.json({ ok: true, resultado: await logoutSupabase(String(body.args?.[0] || body.token || "")) });
         const current = await requireSupabaseSession(String(body.token || ""));
         const profile = String(current.profile.perfil_legacy || current.profile.rol || "").toUpperCase();
+        if (body.fn === "cerrarPeriodoOperativo") {
+          if (!["MASTER", "ADMINISTRADOR"].includes(profile)) throw new Error("Esta operación requiere perfil administrador.");
+          return NextResponse.json({ ok: true, resultado: await closeNativeOperationalPeriod(current.user.id) });
+        }
         if (body.fn === "obtenerUsuarios") return NextResponse.json({ ok: true, resultado: await listSupabaseUsers(String(body.token || "")) });
         if (body.fn === "crearUsuarioSistema") return NextResponse.json({ ok: true, resultado: await createSupabaseUser(String(body.token || ""), (body.args?.[0] || {}) as UserPayload) });
         if (body.fn === "actualizarUsuario") return NextResponse.json({ ok: true, resultado: await updateSupabaseUser(String(body.token || ""), (body.args?.[0] || {}) as UserPayload) });

@@ -279,6 +279,11 @@ export async function getNativeCollections(filters: Record<string, unknown> = {}
 }
 
 type ExpensePayload = Record<string, unknown>;
+export async function closeNativeOperationalPeriod(userId: string) {
+  const { data, error } = await getSupabaseAdminClient().rpc("cerrar_periodo_operativo", { p_usuario: userId });
+  if (error) throw error;
+  return data;
+}
 export async function registerNativeExpense(userId: string, payload: ExpensePayload) {
   const idempotency = String(payload.solicitudId || crypto.randomUUID());
   const row = { fecha: String(payload.fecha || limaToday()), categoria: String(payload.partida || payload.categoria || "OTROS"), subcategoria: String(payload.subcategoria || "") || null, descripcion: String(payload.descripcion || "Gasto operativo"), monto: number(payload.importe ?? payload.monto), medio_pago: String(payload.canal || payload.medioPago || "EFECTIVO").toUpperCase(), origen_dinero: String(payload.origenDinero || "FONDO DE RUTA"), proveedor: String(payload.proveedor || "") || null, comprobante_url: String(payload.comprobanteUrl || "") || null, estado: "PENDIENTE_APROBACION", usuario_id: userId, repartidor_id: userId, idempotency_key: idempotency };

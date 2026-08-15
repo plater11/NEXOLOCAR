@@ -108,6 +108,24 @@ type Summary = {
     entregadosHoy?: number;
     importeEntregadoHoy?: number;
     valorTotalInventario: number;
+    ventasMes?: number;
+    ventasHoy?: number;
+    cobradoMes?: number;
+    porCobrar?: number;
+    clientesPorCobrar?: number;
+    ticketPromedio?: number;
+    ventasCantidadMes?: number;
+    metaMensual?: number;
+    comprasMes?: number;
+    gastosMes?: number;
+    resultadoMes?: number;
+    compraUrgenteProductos?: number;
+    compraUrgentePedidos?: number;
+    cobranzaUrgentePedidos?: number;
+    cobranzaUrgenteMonto?: number;
+    diferenciasCaja?: number;
+    diferenciaCajaMonto?: number;
+    periodo?: { periodo: string; estado: string; cierreAnterior: null | { periodo: string; fecha: string; usuario: string } };
 };
 type ApiRecord = { [key: string]: never };
 type BulkStockRow = { filaExcel: number; codigo: string; presentacion: string; cantidad: number; nuevoCosto: number | null; observacion: string };
@@ -545,7 +563,6 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
     onNavigate: (s: string) => void;
     session: Session;
 }) {
-    const isPreventa = String(session.perfil).toUpperCase() === "PREVENTA";
     const orderDate = (value: string) => {
         const match = String(value || "").match(/^(?:(\d{1,2})\/(\d{1,2})\/(\d{4})|(\d{4})-(\d{1,2})-(\d{1,2}))/);
         if (!match) return "";
@@ -556,18 +573,19 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
     const salesToday = todayOrders.reduce((a, o) => a + Number(o.total || 0), 0);
     const salesMonth = monthOrders.reduce((a, o) => a + Number(o.total || 0), 0);
     const ticketAverage = monthOrders.length ? salesMonth / monthOrders.length : 0;
-    const [monthlyGoal, setMonthlyGoal] = useState(() => cacheGet<number>("nexo_monthly_goal", 20000));
-    const goalProgress = monthlyGoal > 0 ? Math.min(100, (salesMonth / monthlyGoal) * 100) : 0;
+    const [monthlyGoal] = useState(() => cacheGet<number>("nexo_monthly_goal", 20000));
     const [birthdayOpen, setBirthdayOpen] = useState(false);
+    const [closeOpen, setCloseOpen] = useState(false);
+    const [closingPeriod, setClosingPeriod] = useState(false);
+    const [ticketFlash, setTicketFlash] = useState(false);
     if (!summary) return <div className="manager-home home-loading" aria-busy="true" aria-label="Cargando resumen operativo">
         <div className="home-skeleton skeleton-heading"></div>
         <section className="executive-metrics skeleton-grid">{Array.from({ length: 5 }, (_, index) => <article className="home-skeleton" key={index}></article>)}</section>
         <section className="home-control-grid"><div className="home-skeleton skeleton-feature"></div><div className="home-skeleton skeleton-feature"></div></section>
         <section className="operational-home-grid skeleton-grid">{Array.from({ length: 5 }, (_, index) => <div className="home-skeleton skeleton-operation" key={index}></div>)}</section>
     </div>;
-    const birthdays = clients.filter(c => String(c.estado || "ACTIVO").toUpperCase() !== "INACTIVO" && Boolean(c.fechaCumpleanos) && birthdayDays(c.fechaCumpleanos) >= 0 && birthdayDays(c.fechaCumpleanos) <= 20).sort((a, b) => birthdayDays(a.fechaCumpleanos) - birthdayDays(b.fechaCumpleanos));
+    const birthdays = clients.filter(c => String(c.estado || "ACTIVO").toUpperCase() !== "INACTIVO" && Boolean(c.fechaCumpleanos) && birthdayDays(c.fechaCumpleanos) >= 0 && birthdayDays(c.fechaCumpleanos) <= 7).sort((a, b) => birthdayDays(a.fechaCumpleanos) - birthdayDays(b.fechaCumpleanos));
     const birthdayCount = birthdays.length;
-    const todayCount = birthdays.filter(c => birthdayDays(c.fechaCumpleanos) === 0).length;
     const debts = receivables.filter(o => String(o.estadoEntrega).toUpperCase() === "ENTREGADO" && Number(o.saldo || 0) > .01).sort((a, b) => daysSince(b.fechaEntrega || b.fecha) - daysSince(a.fechaEntrega || a.fecha));
     const debtTotal = debts.reduce((sum, o) => sum + Number(o.saldo || 0), 0);
     const deliveredToday = { label: "ENTREGADOS HOY", state: "ENTREGADO", rows: [] as Order[], count: Number(summary?.entregadosHoy || 0), total: Number(summary?.importeEntregadoHoy || 0), todayOnly: true };
@@ -581,27 +599,45 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
     const latestByClient = new Map<string, string>();
     orders.forEach(o => { const key = String(o.cliente || "").trim().toLowerCase(); const date = orderDate(o.fecha); if (key && date && (!latestByClient.get(key) || date > String(latestByClient.get(key)))) latestByClient.set(key, date); });
     const inactiveClients = clients.filter(c => { const key = `${c.nombre} ${c.apellidos}`.trim().toLowerCase(); const last = latestByClient.get(key); return !last || daysSince(last) >= 30; });
-    const reprogrammed = orders.filter(o => String(o.estadoEntrega || o.subestadoOperativo || "").toUpperCase().includes("REPROGRAM"));
-    const rejected = orders.filter(o => String(o.estadoEntrega || o.subestadoOperativo || "").toUpperCase().includes("RECHAZ"));
     const routeOrders = orders.filter(o => String(o.estadoEntrega || "").toUpperCase().replace(/\s+/g, "_") === "EN_RUTA");
     const buyingOrders = operationalCards[0].rows;
     const readyOrders = operationalCards[1].rows;
     const pluralOrders = (value: number) => `${value} ${value === 1 ? "pedido" : "pedidos"}`;
+    const periodDate = new Date(`${summary.periodo?.periodo || `${month()}-01`}T12:00:00`);
+    const periodLabel = periodDate.toLocaleDateString("es-PE", { month: "long", year: "numeric" });
+    const daysInMonth = new Date(periodDate.getFullYear(), periodDate.getMonth() + 1, 0).getDate();
+    const currentDay = Math.min(new Date().getDate(), daysInMonth);
+    const elapsedPercent = Math.round(currentDay / daysInMonth * 100);
+    const remainingDays = Math.max(0, daysInMonth - currentDay);
+    const closePeriod = async () => {
+        if (closingPeriod) return;
+        setClosingPeriod(true);
+        try {
+            const response = await fetch("/api/qaso", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fn: "cerrarPeriodoOperativo", args: [], token: session.token }) });
+            const envelope = await response.json() as { ok?: boolean; message?: string };
+            if (!response.ok || !envelope.ok) throw new Error(envelope.message || "No se pudo cerrar el período.");
+            setCloseOpen(false);
+            window.location.reload();
+        } catch (error) { window.alert(error instanceof Error ? error.message : "No se pudo cerrar el período."); }
+        finally { setClosingPeriod(false); }
+    };
     const openOrders = (state: string, issue = "", todayOnly = false) => { cacheSet("nexo_order_tab", state); cacheSet("nexo_order_date", todayOnly ? "HOY" : "15_DIAS"); cacheSet("nexo_order_issue", issue); onNavigate("Pedidos y emisiÃ³n"); };
     const nextActions = [
-        buyingOrders.length > 0 && { icon: "ðŸ›’", label: `Comprar materiales para ${pluralOrders(buyingOrders.length)}`, run: () => openOrders("POR_COMPRAR") },
-        readyOrders.length > 0 && { icon: "ðŸ“¦", label: `Preparar ${pluralOrders(readyOrders.length)}`, run: () => openOrders("LISTO_PARA_ENTREGA") },
-        routeOrders.length > 0 && { icon: "ðŸšš", label: `Confirmar salida de ${pluralOrders(routeOrders.length)} en ruta`, run: () => openOrders("EN_RUTA") },
-        debts.length > 0 && { icon: "ðŸ’°", label: `Cobrar ${pluralOrders(debts.length)} pendientes`, run: () => openOrders("COBRANZA") },
-        reprogrammed.length > 0 && { icon: "ðŸ“„", label: `Revisar ${pluralOrders(reprogrammed.length)} reprogramados`, run: () => openOrders("OBSERVADO", "REPROGRAMADO") },
-        rejected.length > 0 && { icon: "âš ", label: `Resolver ${pluralOrders(rejected.length)} rechazados`, run: () => openOrders("OBSERVADO", "RECHAZADO") },
-        Number(summary?.rendicionesPendientes || 0) > 0 && { icon: "â›½", label: `Aprobar ${Number(summary?.rendicionesPendientes)} rendiciÃ³n${Number(summary?.rendicionesPendientes) === 1 ? "" : "es"} de gastos`, run: () => onNavigate("Centro de rendiciones") },
-        todayCount > 0 && { icon: "ðŸŽ‚", label: `Hoy cumplen ${todayCount} cliente${todayCount === 1 ? "" : "s"}`, run: () => { cacheSet("nexo_client_birthdays", true); onNavigate("Clientes"); } },
-    ].filter(Boolean) as Array<{ icon: string; label: string; run: () => void }>;
+        Number(summary.compraUrgenteProductos || 0) > 0 && { icon: "🛒", title: "COMPRA URGENTE", label: `${summary.compraUrgenteProductos} materiales · afectan ${summary.compraUrgentePedidos || 0} pedidos`, value: Number(summary.compraUrgenteProductos), run: () => openOrders("POR_COMPRAR") },
+        Number(summary.stockBajo || 0) > 0 && { icon: "📦", title: "STOCK BAJO", label: `${summary.stockBajo} productos debajo del mínimo`, value: Number(summary.stockBajo), run: () => onNavigate("Productos e inventario") },
+        Number(summary.cobranzaUrgentePedidos || 0) > 0 && { icon: "💰", title: "COBRANZA URGENTE", label: `${pluralOrders(Number(summary.cobranzaUrgentePedidos))} · ${money(summary.cobranzaUrgenteMonto)} vencidos`, value: Number(summary.cobranzaUrgentePedidos), run: () => openOrders("COBRANZA", "URGENTE") },
+        Number(summary.rendicionesPendientes || 0) > 0 && { icon: "📄", title: "RENDICIONES PENDIENTES", label: `${summary.rendicionesPendientes} jornadas sin cerrar`, value: Number(summary.rendicionesPendientes), run: () => onNavigate("Centro de rendiciones") },
+        Number(summary.diferenciasCaja || 0) > 0 && { icon: "⚠", title: "DIFERENCIA DE CAJA", label: `${money(summary.diferenciaCajaMonto)} pendientes de justificar`, value: Number(summary.diferenciasCaja), run: () => onNavigate("Centro de rendiciones") },
+    ].filter(Boolean) as Array<{ icon: string; title: string; label: string; value: number; run: () => void }>;
     const activityState = (item: ActivityRecord) => {
         const type = String(item.tipo || "").toUpperCase();
-        const mapped: Record<string, string> = { NUEVO_PEDIDO: "POR COMPRAR", LISTO_ENTREGA: "LISTO PARA ENTREGA", EN_RUTA: "EN RUTA", ENTREGADO_COBRADO: "COBRADO", ENTREGADO_SIN_PAGO: "POR COBRAR", ENTREGADO_SIN_COBRAR: "POR COBRAR", RECHAZADO: "RECHAZADO", REPROGRAMADO: "REPROGRAMADO", NUEVO_STOCK: "INGRESO DE STOCK", GASTO_REGISTRADO: "PENDIENTE DE APROBACIÓN" };
+        const mapped: Record<string, string> = { NUEVO_PEDIDO: "POR COMPRAR", LISTO_ENTREGA: "LISTO PARA ENTREGA", EN_RUTA: "EN RUTA", ASIGNADO_JORNADA: "ASIGNADO A RUTA", ENTREGADO_COBRADO: "COBRADO", ENTREGADO_SIN_PAGO: "POR COBRAR", ENTREGADO_SIN_COBRAR: "POR COBRAR", RECHAZADO: "RECHAZADO", REPROGRAMADO: "REPROGRAMADO", NUEVO_STOCK: "INGRESO DE STOCK", GASTO_REGISTRADO: "PENDIENTE DE APROBACIÓN" };
         return mapped[type] || String(item.estado || "").replace(/_/g, " ") || "REGISTRADO";
+    };
+    const activityLabel = (item: ActivityRecord) => {
+        const type = String(item.tipo || "").toUpperCase();
+        const labels: Record<string, string> = { NUEVO_PEDIDO: "NUEVO PEDIDO", LISTO_ENTREGA: "LISTO PARA ENTREGA", EN_RUTA: "EN RUTA", ASIGNADO_JORNADA: "ASIGNADO A RUTA", ENTREGADO_COBRADO: "ENTREGADO Y COBRADO", ENTREGADO_SIN_PAGO: "ENTREGADO SIN PAGO", ENTREGADO_SIN_COBRAR: "ENTREGADO SIN PAGO", RECHAZADO: "PEDIDO RECHAZADO", REPROGRAMADO: "PEDIDO REPROGRAMADO", NUEVO_STOCK: "INGRESO DE STOCK", GASTO_REGISTRADO: "GASTO REGISTRADO" };
+        return labels[type] || type.replace(/_/g, " ") || "OPERACIÓN";
     };
     const openActivity = (item: ActivityRecord) => {
         if (item.ventaId) { cacheSet("nexo_focus_order", item.ventaId); openOrders(String(item.estado || "").includes("COBR") ? "COBRANZA" : normalizeOperationalState(item.estado || "POR_COMPRAR")); return; }
@@ -609,28 +645,24 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
         if (item.entidad === "CLIENTE") { onNavigate("Clientes"); return; }
         onNavigate("Productos e inventario");
     };
-    const editGoal = () => {
-        const value = window.prompt("Meta mensual de ventas (S/)", String(monthlyGoal));
-        if (value === null) return;
-        const parsed = Number(value.replace(",", "."));
-        if (!Number.isFinite(parsed) || parsed <= 0) return;
-        setMonthlyGoal(parsed); cacheSet("nexo_monthly_goal", parsed);
-    };
-    return <div className={isPreventa ? "preventa-home" : "manager-home"}>
-        <Heading eyebrow={isPreventa ? "MI RUTA COMERCIAL" : "RESUMEN EJECUTIVO"} title={isPreventa ? `Hola, ${session.nombre.split(" ")[0]}` : "Tu operación, en una sola vista."} text={isPreventa ? "Registra pedidos rápido y revisa tu avance del día." : "Indicadores clave para tomar decisiones sin recorrer todo el sistema."}><button className="primary" onClick={() => onNavigate("Preventa")}>＋ Nuevo pedido</button></Heading>
-        {isPreventa && <section className="preventa-hero-card"><div><small>VENTAS DE HOY</small><strong>{money(salesToday)}</strong><span>{todayOrders.length} pedido(s) registrados</span></div><button onClick={() => onNavigate("Preventa")}>Crear pedido</button></section>}
-        <section className="executive-metrics">
-            <article><span>Ventas del día</span><strong>{money(salesToday)}</strong><small>{todayOrders.length} operaciones hoy</small></article>
-            <article className="goal-card"><span>Meta mensual</span><strong>{money(salesMonth)}</strong><div className="goal-progress"><i style={{ width: `${goalProgress}%` }}></i></div><small>{goalProgress.toFixed(0)}% de {money(monthlyGoal)} {!isPreventa && <button onClick={editGoal}>Editar</button>}</small></article>
-            <article><span>Cobros pendientes</span><strong>{money(debtTotal)}</strong><small>{debts.length} cliente(s) por cobrar</small></article>
-            <article><span>Ticket promedio</span><strong>{money(ticketAverage)}</strong><small>{monthOrders.length} ventas este mes</small></article>
-            <article className="inactive-card"><span>Clientes sin compra +30 días</span><strong>{inactiveClients.length}</strong><small>Requieren seguimiento comercial</small></article>
+    const dashboardSales = Number(summary.ventasMes ?? salesMonth);
+    const dashboardGoal = Number(summary.metaMensual || monthlyGoal);
+    const dashboardGoalProgress = dashboardGoal > 0 ? Math.min(100, dashboardSales / dashboardGoal * 100) : 0;
+    return <div className="manager-home control-center-home">
+        <section className="period-control-card"><div><h2>Tu operación,<br/>en una sola vista.</h2><small>PERÍODO DE OPERACIÓN · {periodLabel.toUpperCase()}</small><p>▣ Día {currentDay} de {daysInMonth} · {elapsedPercent}% transcurrido</p><div className="period-progress"><i style={{width:`${elapsedPercent}%`}}></i><b>{elapsedPercent}%</b></div><span>{remainingDays} días restantes</span></div><aside>{["MASTER","ADMINISTRADOR"].includes(String(session.perfil).toUpperCase()) && <button onClick={() => setCloseOpen(true)}>▣ CERRAR PERÍODO</button>}<strong>● Período {String(summary.periodo?.estado || "ABIERTO").toLowerCase()}</strong>{summary.periodo?.cierreAnterior && <p>Cierre anterior: {new Date(`${summary.periodo.cierreAnterior.periodo}T12:00:00`).toLocaleDateString("es-PE",{month:"long",year:"numeric"})}<br/>por {summary.periodo.cierreAnterior.usuario} · {new Date(summary.periodo.cierreAnterior.fecha).toLocaleString("es-PE")}</p>}</aside></section>
+        <section className="executive-metrics financial-control-grid">
+            <button className="goal-card" onClick={() => { cacheSet("nexo_report_period", month()); onNavigate("Reportes"); }}><span>Ventas del mes</span><strong>{money(dashboardSales)}</strong><small>Meta: {money(dashboardGoal)} · {dashboardGoalProgress.toFixed(0)}%</small><div className="goal-progress"><i style={{width:`${dashboardGoalProgress}%`}}></i></div><small>Hoy: {money(summary.ventasHoy ?? salesToday)}</small></button>
+            <button onClick={() => openOrders("COBRANZA")}><span>Cobrado del mes</span><strong>{money(summary.cobradoMes)}</strong><small>{dashboardSales ? (Number(summary.cobradoMes || 0) / dashboardSales * 100).toFixed(0) : 0}% de ventas</small></button>
+            <button onClick={() => openOrders("COBRANZA", "PENDIENTE")}><span>Por cobrar</span><strong>{money(summary.porCobrar ?? debtTotal)}</strong><small>{summary.clientesPorCobrar ?? debts.length} clientes</small></button>
+            <button className={ticketFlash ? "metric-flash" : ""} onClick={() => { setTicketFlash(true); window.setTimeout(() => setTicketFlash(false), 260); }}><span>Ticket promedio</span><strong>{money(summary.ticketPromedio ?? ticketAverage)}</strong><small>{summary.ventasCantidadMes ?? monthOrders.length} ventas este mes</small></button>
         </section>
-        <div className="home-control-grid"><button className={`birthday-alert ${birthdayCount ? "" : "birthday-empty"}`} onClick={() => setBirthdayOpen(true)}><span className="birthday-cake">🎂</span><div><small>{todayCount ? "¡CUMPLEAÑOS DE HOY!" : "CUMPLEAÑOS PRÓXIMOS"}</small><strong>{birthdayCount}</strong><p>{birthdays.length ? birthdays.slice(0, 3).map(c => `${c.nombre} ${c.apellidos}`.trim()).join(", ") : "0 cumpleaños próximos"}</p></div></button><section className="next-actions"><header><small>CENTRO DE CONTROL DIARIO</small><h3>Próximas acciones</h3></header>{nextActions.length ? <div>{nextActions.map(action => <button key={action.label} onClick={action.run}><span>{action.icon}</span><b>{action.label}</b><i>›</i></button>)}</div> : <div className="operation-current"><strong>✅ OPERACIÓN AL DÍA</strong><p>No existen tareas pendientes.</p></div>}</section></div>
-        <section className="operational-home-grid">{operationalCards.map(card => { const count = "count" in card ? card.count : card.rows.length; const total = "total" in card ? card.total : card.rows.reduce((sum, order) => sum + Number(order.total || 0), 0); return <button key={card.state} onClick={() => openOrders(card.state, "", "todayOnly" in card && Boolean(card.todayOnly))}><small>{card.label}</small><strong>{pluralOrders(count)}</strong><span>{money(total)}</span></button>; })}</section>
-        {!isPreventa && <section className="manager-secondary-metrics"><article><p>Clientes registrados</p><strong>{summary?.totalClientes || clients.length}</strong><small>{inactiveClients.length} sin compra +30 días</small></article><article><p>Productos</p><strong>{summary?.totalProductos || 0}</strong><small>{summary?.stockBajo || 0} con stock bajo</small></article><article><p>Valor de inventario</p><strong>{money(summary?.valorTotalInventario)}</strong><small>{summary?.conStock || 0} con stock · {summary?.sinStock || 0} sin stock</small></article></section>}
-        <section className="panel recent-activity"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Actividad transversal del ERP en tiempo real</p></div></div><div>{activities.slice(0, 15).map(item => <button className="activity-row" key={item.id} onClick={() => openActivity(item)}><time>{new Date(item.fecha).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</time><span><b>{item.tipo.replace(/_/g," ")}</b><small>{item.cliente || "Operación del ERP"}{item.ubicacion ? ` · ${item.ubicacion}` : ""}</small><em>{item.descripcion || "Sin comentario"}</em></span>{item.monto > 0 && <strong>{money(item.monto)}</strong>}<i>{activityState(item)}</i></button>)}{!activities.length && <p className="empty-activity">Aún no existen operaciones registradas en el historial transversal.</p>}</div></section>
-        {birthdayOpen && <div className="modal-bg" onMouseDown={event => { if (event.target === event.currentTarget) setBirthdayOpen(false); }}><section className="birthday-list-modal" role="dialog" aria-modal="true" aria-label="Cumpleaños próximos" onMouseDown={event => event.stopPropagation()}><header><div><small>PRÓXIMOS 20 DÍAS</small><h2>Cumpleaños próximos</h2></div><button onClick={() => setBirthdayOpen(false)}>×</button></header><div>{birthdays.map(client => <article key={client.id}><span><b>{client.nombre} {client.apellidos}</b><small>{client.contacto || "Sin teléfono"}</small></span><strong>{birthdayDays(client.fechaCumpleanos) === 0 ? "Hoy" : `En ${birthdayDays(client.fechaCumpleanos)} día(s)`}</strong></article>)}{!birthdays.length && <p>0 cumpleaños próximos.</p>}</div></section></div>}
+        <div className="home-control-grid"><section className="birthday-panel"><header><h3>🎂 CUMPLEAÑOS PRÓXIMOS</h3><button onClick={() => setBirthdayOpen(true)}>Ver todos</button></header>{birthdays.slice(0,2).map(client=><button key={client.id} onClick={()=>{cacheSet("nexo_focus_client",client.id);onNavigate("Clientes");}}><b>{client.nombre} {client.apellidos}</b><small>{new Date(`${client.fechaCumpleanos}T12:00:00`).toLocaleDateString("es-PE",{day:"numeric",month:"long"})} · {birthdayDays(client.fechaCumpleanos)===0?"hoy":`en ${birthdayDays(client.fechaCumpleanos)} días`}</small><i>›</i></button>)}{!birthdays.length&&<p>Sin cumpleaños en los próximos 7 días.</p>}<footer>{birthdayCount} {birthdayCount===1?"cumpleaños":"cumpleaños"} en los próximos 7 días</footer></section><section className="next-actions alert-deviations"><header><small>CONTROL OPERATIVO</small><h3>Alertas y desviaciones</h3></header>{nextActions.length?<div>{nextActions.map(action=><button key={action.title} onClick={action.run}><span>{action.icon}</span><b>{action.title}<small>{action.label}</small></b><em>{action.value}</em><i>›</i></button>)}</div>:<div className="operation-current"><strong>✓ OPERACIÓN SIN ALERTAS CRÍTICAS</strong><p>No existen situaciones pendientes.</p></div>}</section></div>
+        <section className="home-section-title"><h3>OPERACIÓN HOY</h3><button onClick={()=>onNavigate("Pedidos y emisión")}>Ver pedidos y emisión</button></section>
+        <section className="operational-home-grid">{operationalCards.map(card=>{const count="count" in card?card.count:card.rows.length;const total="total" in card?card.total:card.rows.reduce((sum,order)=>sum+Number(order.total||0),0);return <button key={card.state} onClick={()=>openOrders(card.state,"","todayOnly" in card&&Boolean(card.todayOnly))}><small>{card.label}</small><strong>{pluralOrders(count)}</strong><span>{money(total)}</span></button>;})}</section>
+        <section className="manager-secondary-metrics"><button onClick={()=>onNavigate("Clientes")}><p>Clientes registrados</p><strong>{summary.totalClientes||clients.length}</strong><small>{inactiveClients.length} sin compra +30 días</small></button><button onClick={()=>onNavigate("Productos e inventario")}><p>Productos</p><strong>{summary.totalProductos||0}</strong><small>{summary.stockBajo||0} con stock bajo</small></button><button onClick={()=>onNavigate("Productos e inventario")}><p>Valor de inventario</p><strong>{money(summary.valorTotalInventario)}</strong><small>{summary.conStock||0} con stock · {summary.sinStock||0} sin stock</small></button></section>
+        <section className="panel recent-activity"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Últimos movimientos del sistema</p></div><button onClick={()=>onNavigate("Reportes")}>Ver todas</button></div><div>{activities.slice(0,5).map(item=><button className="activity-row" key={item.id} onClick={()=>openActivity(item)}><time>{new Date(item.fecha).toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"})}</time><span><b>{activityLabel(item)}</b><small>{item.cliente||"Operación del ERP"}{item.ubicacion?` · ${item.ubicacion}`:""}</small><em>{item.descripcion||"Sin comentario"}</em></span>{item.monto>0&&<strong>{money(item.monto)}</strong>}<i>{activityState(item)}</i></button>)}{!activities.length&&<p className="empty-activity">Aún no existen operaciones registradas.</p>}</div></section>
+        {birthdayOpen&&<div className="modal-bg" onMouseDown={event=>{if(event.target===event.currentTarget)setBirthdayOpen(false);}}><section className="birthday-list-modal" role="dialog" aria-modal="true"><header><div><small>PRÓXIMOS 7 DÍAS</small><h2>Cumpleaños próximos</h2></div><button onClick={()=>setBirthdayOpen(false)}>×</button></header><div>{birthdays.map(client=><article key={client.id}><button onClick={()=>{cacheSet("nexo_focus_client",client.id);onNavigate("Clientes");}}><span><b>{client.nombre} {client.apellidos}</b><small>{client.contacto||"Sin teléfono"}</small></span><strong>{birthdayDays(client.fechaCumpleanos)===0?"Hoy":`En ${birthdayDays(client.fechaCumpleanos)} día(s)`}</strong></button></article>)}{!birthdays.length&&<p>0 cumpleaños próximos.</p>}</div></section></div>}
+        {closeOpen&&<div className="modal-bg"><section className="period-close-modal"><header><div><small>CIERRE OPERATIVO</small><h2>Cerrar {periodLabel}</h2></div><button onClick={()=>setCloseOpen(false)}>×</button></header><div className="period-close-summary"><span>Ventas <b>{money(summary.ventasMes)}</b></span><span>Cobrado <b>{money(summary.cobradoMes)}</b></span><span>Por cobrar <b>{money(summary.porCobrar)}</b></span><span>Compras <b>{money(summary.comprasMes)}</b></span><span>Gastos <b>{money(summary.gastosMes)}</b></span><span>Resultado <b>{money(summary.resultadoMes)}</b></span><span>Stock valorizado <b>{money(summary.valorTotalInventario)}</b></span></div><div className="period-pending"><h3>Pendientes antes del cierre</h3><p>{buyingOrders.length+readyOrders.length+routeOrders.length} pedidos · {summary.clientesPorCobrar||0} cobranzas · {summary.rendicionesPendientes||0} rendiciones</p><small>El cierre guardará una fotografía del período, protegerá sus transacciones y abrirá el siguiente mes.</small></div><footer><button onClick={()=>setCloseOpen(false)}>Cancelar</button><button className="primary" disabled={closingPeriod} onClick={closePeriod}>{closingPeriod?"Cerrando…":"Confirmar cierre"}</button></footer></section></div>}
     </div>;
 }
 function Clients({ clients, call, refresh, notify, online }: {

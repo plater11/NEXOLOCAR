@@ -95,35 +95,102 @@ export async function orderCatalog(filters: Record<string, unknown> = {}) {
 
 export async function operationalSummary() {
   const db = getSupabaseAdminClient();
-  const [{ count: clients, error: clientError }, { data: products, error: productError }, { data: stock, error: stockError }, { count: pendingExpenses, error: expenseError }] = await Promise.all([
+  const now = new Date();
+  const limaParts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(now).split("-");
+  const period = `${limaParts[0]}-${limaParts[1]}`;
+  const limaDay = limaParts.join("-");
+  const from = `${period}-01T00:00:00-05:00`;
+  const nextDate = new Date(Number(limaParts[0]), Number(limaParts[1]), 1);
+  const nextPeriod = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-01T00:00:00-05:00`;
+  const [clientResult, productResult, stockResult, expenseResult, orderResult, paymentResult, renditionResult, periodResult, budgetResult, inventoryResult] = await Promise.all([
     db.from("clientes").select("id", { count: "exact", head: true }).eq("estado", "ACTIVO"),
     db.from("productos").select("id,costo_actual,stock_min").eq("activo", true),
     db.from("stock_actual").select("producto_id,stock_fisico"),
     db.from("gastos").select("id", { count: "exact", head: true }).eq("estado", "PENDIENTE_APROBACION"),
+    db.from("pedidos").select("id,cliente_id,fecha,total,estado_operativo,estado_entrega,estado_cobranza").neq("estado_operativo", "ANULADO"),
+    db.from("pagos").select("pedido_id,fecha,monto,estado").eq("estado", "APLICADO"),
+    db.from("rendiciones").select("id,diferencia,estado").neq("estado", "VALIDADA"),
+    db.from("periodos_operativos").select("periodo,estado,cerrado_at,cerrado_por,snapshot").order("periodo", { ascending: false }).limit(12),
+    db.from("presupuestos").select("objetivo_ventas").eq("anio", Number(limaParts[0])).eq("mes", Number(limaParts[1])).maybeSingle(),
+    db.from("movimientos_inventario").select("producto_id,cantidad,tipo_movimiento,created_at").eq("tipo_movimiento", "INGRESO_COMPRA").gte("created_at", from).lt("created_at", nextPeriod),
   ]);
+  const { count: clients, error: clientError } = clientResult;
+  const { data: products, error: productError } = productResult;
+  const { data: stock, error: stockError } = stockResult;
+  const { count: pendingExpenses, error: expenseError } = expenseResult;
   if (clientError) throw clientError;
   if (productError) throw productError;
   if (stockError) throw stockError;
   if (expenseError) throw expenseError;
+  for (const result of [orderResult, paymentResult, renditionResult, periodResult, budgetResult, inventoryResult]) if (result.error) throw result.error;
   const stockMap = new Map((stock || []).map(row => [row.producto_id, Number(row.stock_fisico)]));
   const withStock = (products || []).filter(product => (stockMap.get(product.id) || 0) > 0).length;
-  const limaDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const { data: deliveries, error: deliveryError } = await db.from("entregas").select("pedido_id").in("estado", ["ENTREGA_COMPLETA", "ENTREGA_PARCIAL"]).gte("fecha_entrega", `${limaDay}T00:00:00-05:00`).lte("fecha_entrega", `${limaDay}T23:59:59-05:00`);
   if (deliveryError) throw deliveryError;
   const deliveredIds = [...new Set((deliveries || []).map(row => row.pedido_id))];
   const deliveredResult = deliveredIds.length ? await db.from("pedidos").select("id,total").in("id", deliveredIds) : { data: [], error: null };
   if (deliveredResult.error) throw deliveredResult.error;
+  const orders = orderResult.data || [];
+  const payments = paymentResult.data || [];
+  const monthOrders = orders.filter(row => String(row.fecha) >= from && String(row.fecha) < nextPeriod);
+  const monthPayments = payments.filter(row => String(row.fecha) >= from && String(row.fecha) < nextPeriod);
+  const salesMonth = monthOrders.reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const salesToday = monthOrders.filter(row => String(row.fecha).slice(0, 10) === limaDay).reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const collectedMonth = monthPayments.reduce((sum, row) => sum + Number(row.monto || 0), 0);
+  const paidByOrder = new Map<string, number>();
+  payments.forEach(row => paidByOrder.set(row.pedido_id, (paidByOrder.get(row.pedido_id) || 0) + Number(row.monto || 0)));
+  const receivableRows = orders.filter(row => Math.max(0, Number(row.total || 0) - (paidByOrder.get(row.id) || 0)) > .01);
+  const receivable = receivableRows.reduce((sum, row) => sum + Math.max(0, Number(row.total || 0) - (paidByOrder.get(row.id) || 0)), 0);
+  const urgentReceivables = receivableRows.filter(row => row.estado_cobranza === "COBRANZA_URGENTE");
+  const productCost = new Map((products || []).map(row => [row.id, Number(row.costo_actual || 0)]));
+  const purchasesMonth = (inventoryResult.data || []).reduce((sum, row) => sum + Number(row.cantidad || 0) * (productCost.get(row.producto_id) || 0), 0);
+  const approvedExpenses = await db.from("gastos").select("monto").eq("estado", "APROBADO").gte("fecha", `${period}-01`).lt("fecha", nextPeriod.slice(0, 10));
+  if (approvedExpenses.error) throw approvedExpenses.error;
+  const expensesMonth = (approvedExpenses.data || []).reduce((sum, row) => sum + Number(row.monto || 0), 0);
+  const periods = periodResult.data || [];
+  const currentPeriod = periods.find(row => String(row.periodo).startsWith(period));
+  const previousClose = periods.find(row => row.estado === "CERRADO");
+  let previousUser = "Administrador";
+  if (previousClose?.cerrado_por) {
+    const profile = await db.from("usuarios_perfil").select("nombre").eq("id", previousClose.cerrado_por).maybeSingle();
+    if (!profile.error && profile.data?.nombre) previousUser = profile.data.nombre;
+  }
+  const cashDifference = (renditionResult.data || []).reduce((sum, row) => sum + Math.abs(Number(row.diferencia || 0)), 0);
+  const stockLow = (products || []).filter(product => { const value = stockMap.get(product.id) || 0; return value > 0 && value <= Number(product.stock_min || 0); }).length;
+  const urgentProducts = (products || []).filter(product => (stockMap.get(product.id) || 0) <= 0).length;
   return {
     totalProductos: products?.length || 0,
     totalMovimientos: 0,
     sinStock: (products || []).filter(product => (stockMap.get(product.id) || 0) <= 0).length,
     conStock: withStock,
-    stockBajo: (products || []).filter(product => (stockMap.get(product.id) || 0) <= Number(product.stock_min)).length,
+    stockBajo: stockLow,
     cumpleanos: 0,
     totalClientes: clients || 0,
     rendicionesPendientes: pendingExpenses || 0,
     entregadosHoy: deliveredResult.data?.length || 0,
     importeEntregadoHoy: (deliveredResult.data || []).reduce((sum, order) => sum + Number(order.total || 0), 0),
     valorTotalInventario: (products || []).reduce((sum, product) => sum + (stockMap.get(product.id) || 0) * Number(product.costo_actual), 0),
+    ventasMes: salesMonth,
+    ventasHoy: salesToday,
+    cobradoMes: collectedMonth,
+    porCobrar: receivable,
+    clientesPorCobrar: new Set(receivableRows.map(row => row.cliente_id)).size,
+    ticketPromedio: monthOrders.length ? salesMonth / monthOrders.length : 0,
+    ventasCantidadMes: monthOrders.length,
+    metaMensual: Number(budgetResult.data?.objetivo_ventas || 0),
+    comprasMes: purchasesMonth,
+    gastosMes: expensesMonth,
+    resultadoMes: salesMonth - purchasesMonth - expensesMonth,
+    compraUrgenteProductos: urgentProducts,
+    compraUrgentePedidos: orders.filter(row => row.estado_operativo === "POR_COMPRAR" && String(row.fecha).slice(0, 10) <= limaDay).length,
+    cobranzaUrgentePedidos: urgentReceivables.length,
+    cobranzaUrgenteMonto: urgentReceivables.reduce((sum, row) => sum + Math.max(0, Number(row.total || 0) - (paidByOrder.get(row.id) || 0)), 0),
+    diferenciasCaja: (renditionResult.data || []).filter(row => Math.abs(Number(row.diferencia || 0)) > .01).length,
+    diferenciaCajaMonto: cashDifference,
+    periodo: {
+      periodo: `${period}-01`,
+      estado: currentPeriod?.estado || "ABIERTO",
+      cierreAnterior: previousClose ? { periodo: previousClose.periodo, fecha: previousClose.cerrado_at, usuario: previousUser } : null,
+    },
   };
 }

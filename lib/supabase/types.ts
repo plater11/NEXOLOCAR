@@ -31,6 +31,7 @@ export type Database = {
       presupuestos: Table<{ id: string; anio: number; mes: number; objetivo_ventas: number; estado: string; created_at: string }>;
       presupuesto_detalle: Table<{ id: string; presupuesto_id: string; categoria: string; partida: string; monto: number }>;
       objetivos: Table<{ id: string; nombre: string; monto: number; fecha_objetivo: string | null; prioridad: string | null; estado: string; created_at: string }>;
+      periodos_operativos: Table<{ id: string; periodo: string; estado: string; snapshot: Record<string, unknown>; abierto_por: string | null; cerrado_por: string | null; abierto_at: string; cerrado_at: string | null; created_at: string }>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -47,6 +48,7 @@ export type Database = {
       bulk_update_orders: { Args: { p_pedido_ids: string[]; p_accion: string; p_payload: Record<string, unknown> }; Returns: Record<string, unknown> };
       procesar_carga_masiva_stock: { Args: { p_items: Array<Record<string, unknown>>; p_usuario_id: string; p_idempotency_key: string }; Returns: Record<string, unknown> };
       revertir_carga_masiva_stock: { Args: { p_lote_id: string; p_usuario_id: string; p_motivo: string }; Returns: Record<string, unknown> };
+      cerrar_periodo_operativo: { Args: { p_usuario: string }; Returns: Record<string, unknown> };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
