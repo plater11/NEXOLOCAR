@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
 import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, mirrorSaleMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_ORDER_MUTATIONS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
 import { createSupabaseUser, deleteSupabaseUser, listSupabaseUsers, loginSupabase, logoutSupabase, requireSupabaseSession, updateSupabaseUser, type UserPayload } from "../../../lib/supabase/auth";
-import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState } from "../../../lib/supabase/operations";
+import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeBulkStockTemplate, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, getNativeStockBatches, importNativeBulkStock, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, revertNativeStockBatch, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState, validateNativeBulkStock } from "../../../lib/supabase/operations";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "obtenerCatalogoProductos",
   "obtenerClientes", "obtenerClientesPreventa", "registrarCliente", "limpiarClientesDuplicados", "actualizarCliente", "eliminarCliente",
   "registrarVenta", "obtenerStock", "obtenerListas", "registrarProducto", "actualizarProducto", "eliminarProducto", "registrarMovimiento",
-  "registrarMovimientosMasivos", "validarCargaMasivaInventario", "importarCargaMasivaInventario", "obtenerMovimientosIngreso", "obtenerHistorial",
+  "registrarMovimientosMasivos", "validarCargaMasivaInventario", "importarCargaMasivaInventario", "obtenerPlantillaCargaMasiva", "obtenerLotesStock", "revertirCargaMasivaStock", "obtenerMovimientosIngreso", "obtenerHistorial",
   "obtenerEmisiones", "generarCodigoImpresion", "obtenerCobranzaPedidos", "guardarCobranzaPedido",
   "corregirPedido", "actualizarEstadoOperativoPedido", "obtenerHistorialEstadosPedido",
   "obtenerPreparacionPedido", "guardarPreparacionPedido", "asignarPedidoJornada", "obtenerConsolidadoCompra", "actualizarPedidosMasivo", "obtenerActividadReciente",
@@ -46,7 +46,15 @@ export async function POST(request: Request) {
         if (["registrarProducto","actualizarProducto"].includes(body.fn)) return NextResponse.json({ok:true,resultado:await saveNativeProduct((body.args?.[0]||{}) as Record<string,unknown>)});
         if (body.fn === "eliminarProducto") return NextResponse.json({ok:true,resultado:await deleteNativeProduct(body.args?.[0])});
         if (body.fn === "registrarMovimiento") return NextResponse.json({ok:true,resultado:await registerNativeInventoryMovement(String(body.token||""),(body.args?.[0]||{}) as Record<string,unknown>)});
-        if (["registrarMovimientosMasivos","importarCargaMasivaInventario"].includes(body.fn)){const rows=Array.isArray(body.args?.[0])?body.args[0]:[];for(const row of rows)await registerNativeInventoryMovement(String(body.token||""),row as Record<string,unknown>);return NextResponse.json({ok:true,resultado:`${rows.length} movimiento(s) registrados correctamente.`});}
+        if (body.fn === "registrarMovimientosMasivos") { const rows=Array.isArray(body.args?.[0])?body.args[0]:[]; for(const row of rows) await registerNativeInventoryMovement(String(body.token||""),row as Record<string,unknown>); return NextResponse.json({ok:true,resultado:`${rows.length} movimiento(s) registrados correctamente.`}); }
+        if (body.fn === "obtenerPlantillaCargaMasiva") return NextResponse.json({ok:true,resultado:await getNativeBulkStockTemplate()});
+        if (body.fn === "validarCargaMasivaInventario") return NextResponse.json({ok:true,resultado:await validateNativeBulkStock(Array.isArray(body.args?.[0]) ? body.args[0] : [])});
+        if (body.fn === "importarCargaMasivaInventario") return NextResponse.json({ok:true,resultado:await importNativeBulkStock(current.user.id,Array.isArray(body.args?.[0]) ? body.args[0] : [],String(body.args?.[1] || crypto.randomUUID()))});
+        if (body.fn === "obtenerLotesStock") return NextResponse.json({ok:true,resultado:await getNativeStockBatches()});
+        if (body.fn === "revertirCargaMasivaStock") {
+          if (!["MASTER","ADMINISTRADOR"].includes(profile)) throw new Error("Esta operación requiere perfil administrador.");
+          return NextResponse.json({ok:true,resultado:await revertNativeStockBatch(current.user.id,body.args?.[0],body.args?.[1])});
+        }
         if (body.fn === "obtenerListas") return NextResponse.json({ok:true,resultado:await getNativeLists()});
         if (["obtenerHistorial","obtenerMovimientosIngreso"].includes(body.fn)) return NextResponse.json({ok:true,resultado:await getNativeInventoryHistory()});
         if(body.fn==="actualizarEstadoOperativoPedido")return NextResponse.json({ok:true,resultado:await updateNativeOrderState(current.user.id,(body.args?.[0]||{}) as Record<string,unknown>)});
@@ -82,7 +90,6 @@ export async function POST(request: Request) {
         if (body.fn === "obtenerResumenJornada") return NextResponse.json({ ok: true, resultado: await getNativeJourneySummary(body.args?.[0], current.user.id) });
         if (body.fn === "cerrarJornada") return NextResponse.json({ ok: true, resultado: await closeNativeJourney(current.user.id, (body.args?.[0] || {}) as Parameters<typeof closeNativeJourney>[1]) });
         if (body.fn === "obtenerRendicionDia") return NextResponse.json({ ok: true, resultado: await getNativeRendition(body.args?.[0], profile === "MASTER" || profile === "ADMINISTRADOR" ? undefined : current.user.id) });
-        if(body.fn==="validarCargaMasivaInventario"){const rows=Array.isArray(body.args?.[0])?body.args[0] as Array<Record<string,unknown>>:[],invalid=rows.filter(row=>!String(row.codigo||"").trim()||!(Number(row.cantidadCarga)>0));return NextResponse.json({ok:true,resultado:{ok:invalid.length===0,mensaje:invalid.length?`${invalid.length} fila(s) inválidas.`:`${rows.length} fila(s) listas para importar.`}});}
         if(SUPABASE_COMPAT_READS.has(body.fn))return NextResponse.json({ok:true,resultado:await executeCompatRead(body.fn,body.args||[])});
         return NextResponse.json({ok:false,code:"SUPABASE_OPERATION_NOT_IMPLEMENTED",message:`La operación ${body.fn} no forma parte del flujo Supabase habilitado.`},{status:501});
       } catch (authError) {

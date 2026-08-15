@@ -171,6 +171,82 @@ export async function registerNativeInventoryMovement(token:string,payload:Entit
 export async function getNativeLists(){const db=getSupabaseAdminClient();const[{data:products,error},{data:categories}]=await Promise.all([db.from("productos").select("unidad_base,grupo").eq("activo",true),db.from("categorias").select("nombre").eq("activo",true)]);if(error)throw error;return{unidades:[...new Set((products||[]).map(r=>r.unidad_base).filter(Boolean))].sort(),grupos:[...new Set([...(products||[]).map(r=>r.grupo),...(categories||[]).map(r=>r.nombre)].filter(Boolean))].sort()};}
 export async function getNativeInventoryHistory(){const db=getSupabaseAdminClient();const{data:movements,error}=await db.from("movimientos_inventario").select("*").order("created_at",{ascending:false}).limit(500);if(error)throw error;const ids=[...new Set((movements||[]).map(r=>r.producto_id))],{data:products}=await db.from("productos").select("id,codigo,nombre").in("id",ids.length?ids:[crypto.randomUUID()]);const map=new Map((products||[]).map(r=>[r.id,r]));return(movements||[]).map(r=>({fecha:r.created_at,codigo:map.get(r.producto_id)?.codigo||"",producto:map.get(r.producto_id)?.nombre||"Producto",tipo:r.tipo_movimiento,cantidad:number(r.cantidad),saldoAnterior:number(r.saldo_anterior),saldoNuevo:number(r.saldo_nuevo),observaciones:r.observacion||""}));}
 
+type BulkStockRow = { filaExcel?: number; codigo?: string; presentacion?: string; cantidad?: number; nuevoCosto?: number | null; observacion?: string };
+
+export async function getNativeBulkStockTemplate() {
+  const db = getSupabaseAdminClient();
+  const [{ data: products, error: productError }, { data: presentations, error: presentationError }, { data: stocks, error: stockError }] = await Promise.all([
+    db.from("productos").select("id,codigo,nombre,costo_actual,activo").eq("activo", true).order("codigo"),
+    db.from("presentaciones").select("id,producto_id,nombre,factor,permite_fraccionamiento,activo").eq("activo", true),
+    db.from("stock_actual").select("producto_id,stock_fisico"),
+  ]);
+  if (productError || presentationError || stockError) throw productError || presentationError || stockError;
+  const productMap = new Map((products || []).map(row => [row.id, row]));
+  const stockMap = new Map((stocks || []).map(row => [row.producto_id, number(row.stock_fisico)]));
+  return (presentations || []).map(row => {
+    const product = productMap.get(row.producto_id); if (!product) return null;
+    const factor = Math.max(number(row.factor), 0.0001);
+    return { codigo: product.codigo, producto: product.nombre, presentacion: row.nombre, factor, stockActual: stockMap.get(product.id) || 0, stockPresentacion: (stockMap.get(product.id) || 0) / factor, costoActual: number(product.costo_actual) * factor, permiteFraccionamiento: Boolean(row.permite_fraccionamiento) };
+  }).filter(Boolean);
+}
+
+export async function validateNativeBulkStock(rows: BulkStockRow[]) {
+  const db = getSupabaseAdminClient();
+  const [{ data: products, error: productError }, { data: presentations, error: presentationError }, { data: stocks, error: stockError }] = await Promise.all([
+    db.from("productos").select("id,codigo,nombre,costo_actual,activo").eq("activo", true),
+    db.from("presentaciones").select("id,producto_id,nombre,factor,permite_fraccionamiento,activo").eq("activo", true),
+    db.from("stock_actual").select("producto_id,stock_fisico"),
+  ]);
+  if (productError || presentationError || stockError) throw productError || presentationError || stockError;
+  const productByCode = new Map((products || []).map(row => [String(row.codigo).trim().toUpperCase(), row]));
+  const presentationByKey = new Map((presentations || []).map(row => [`${row.producto_id}|${String(row.nombre).trim().toUpperCase()}`, row]));
+  const stockByProduct = new Map((stocks || []).map(row => [row.producto_id, number(row.stock_fisico)]));
+  const errors: Array<{ fila: number; mensaje: string }> = [], seen = new Set<string>(), normalized: Array<Record<string, unknown>> = [];
+  for (const source of rows) {
+    const fila = number(source.filaExcel) || 2, codigo = String(source.codigo || "").trim().toUpperCase(), presentationName = String(source.presentacion || "").trim();
+    const quantity = number(source.cantidad), newCost = source.nuevoCosto === null || source.nuevoCosto === undefined || source.nuevoCosto === 0 ? null : number(source.nuevoCosto);
+    if (!codigo && !presentationName && quantity === 0 && newCost === null && !String(source.observacion || "").trim()) continue;
+    if (quantity === 0) continue;
+    const product = productByCode.get(codigo);
+    if (!product) { errors.push({ fila, mensaje: `Código ${codigo || "vacío"} no existe o está inactivo.` }); continue; }
+    const presentation = presentationByKey.get(`${product.id}|${presentationName.toUpperCase()}`);
+    if (!presentation) { errors.push({ fila, mensaje: `Presentación “${presentationName || "vacía"}” no existe para ${codigo}.` }); continue; }
+    const key = `${product.id}|${presentation.id}`;
+    if (seen.has(key)) { errors.push({ fila, mensaje: `${codigo} · ${presentationName} está duplicado.` }); continue; } seen.add(key);
+    if (quantity < 0) { errors.push({ fila, mensaje: "La cantidad no puede ser negativa." }); continue; }
+    if (!presentation.permite_fraccionamiento && !Number.isInteger(quantity)) { errors.push({ fila, mensaje: `${presentationName} requiere una cantidad entera.` }); continue; }
+    if (newCost !== null && newCost <= 0) { errors.push({ fila, mensaje: "El nuevo costo debe ser mayor que cero." }); continue; }
+    const factor = number(presentation.factor), currentBase = stockByProduct.get(product.id) || 0;
+    normalized.push({ filaExcel: fila, productoId: product.id, presentacionId: presentation.id, codigo, producto: product.nombre, presentacion: presentation.nombre, factor, cantidad: quantity, cantidadBase: quantity * factor, stockActual: currentBase / factor, stockNuevo: currentBase / factor + quantity, costoActual: number(product.costo_actual) * factor, nuevoCosto: newCost, observacion: String(source.observacion || "").trim(), permiteFraccionamiento: Boolean(presentation.permite_fraccionamiento) });
+  }
+  const costByProduct = new Map<string, number>();
+  for (const row of normalized) if (number(row.nuevoCosto) > 0) {
+    const baseCost = number(row.nuevoCosto) / number(row.factor), previous = costByProduct.get(String(row.productoId));
+    if (previous !== undefined && Math.abs(previous - baseCost) > 0.0001) errors.push({ fila: number(row.filaExcel), mensaje: `${row.codigo} tiene costos nuevos inconsistentes.` });
+    costByProduct.set(String(row.productoId), baseCost);
+  }
+  if (normalized.length === 0 && errors.length === 0) errors.push({ fila: 0, mensaje: "El archivo no contiene cantidades mayores que cero." });
+  const total = normalized.reduce((sum, row) => sum + number(row.cantidad) * (number(row.nuevoCosto) || number(row.costoActual)), 0);
+  return { ok: errors.length === 0 && normalized.length > 0, filas: normalized, errores: errors, resumen: { productos: new Set(normalized.map(row => row.productoId)).size, filas: normalized.length, cantidadPresentaciones: normalized.reduce((sum, row) => sum + number(row.cantidad), 0), valorEstimado: Math.round(total * 100) / 100 }, mensaje: errors.length ? `${errors.length} error(es) impiden la importación.` : `${normalized.length} fila(s) listas para importar.` };
+}
+
+export async function importNativeBulkStock(userId: string, rows: BulkStockRow[], requestId: string) {
+  const validation = await validateNativeBulkStock(rows); if (!validation.ok) return validation;
+  const items = validation.filas.map(row => ({ filaExcel: row.filaExcel, productoId: row.productoId, presentacionId: row.presentacionId, factor: row.factor, cantidad: row.cantidad, nuevoCosto: row.nuevoCosto || "", observacion: row.observacion }));
+  const { data, error } = await getSupabaseAdminClient().rpc("procesar_carga_masiva_stock", { p_items: items, p_usuario_id: userId, p_idempotency_key: requestId });
+  if (error) throw error; return { ...(data as Record<string, unknown>), mensaje: `Lote ${(data as Record<string, unknown>)?.codigoLote || ""} importado correctamente.` };
+}
+
+export async function getNativeStockBatches() {
+  const db = getSupabaseAdminClient(); const { data: batches, error } = await db.from("lotes_stock").select("*").order("created_at", { ascending: false }).limit(100); if (error) throw error;
+  return ((batches || []) as unknown as Array<Record<string, unknown>>).map(row => ({ loteId: String(row.id), codigoLote: String(row.codigo), fecha: String(row.created_at), estado: String(row.estado), productos: number(row.total_productos), cantidad: number(row.total_presentaciones), valor: number(row.valor_estimado), motivoReversion: String(row.motivo_reversion || "") }));
+}
+
+export async function revertNativeStockBatch(userId: string, batchId: unknown, reason: unknown) {
+  const { data, error } = await getSupabaseAdminClient().rpc("revertir_carga_masiva_stock", { p_lote_id: String(batchId || ""), p_usuario_id: userId, p_motivo: String(reason || "") });
+  if (error) throw error; return data;
+}
+
 export async function updateNativeOrderState(userId:string,payload:EntityPayload){const order=await orderByCode(payload.ventaId),state=String(payload.estado||"POR_COMPRAR").toUpperCase().replace(/ /g,"_");if(!["POR_COMPRAR","LISTO_PARA_ENTREGA","ENTREGADO","OBSERVADO","ANULADO"].includes(state))throw new Error("Estado operativo inválido.");const db=getSupabaseAdminClient(),previous=order.estado_operativo;const{error}=await db.from("pedidos").update({estado_operativo:state,updated_at:new Date().toISOString()}).eq("id",order.id);if(error)throw error;const history=await db.from("pedido_historial_estado").insert({pedido_id:order.id,tipo_estado:"OPERATIVO",estado_anterior:previous,estado_nuevo:state,observacion:String(payload.observacion||""),usuario_id:userId});if(history.error)throw history.error;return "Estado actualizado correctamente.";}
 export async function getNativeOrderHistory(value:unknown){const order=await orderByCode(value),{data,error}=await getSupabaseAdminClient().from("pedido_historial_estado").select("*").eq("pedido_id",order.id).order("created_at",{ascending:false});if(error)throw error;return(data||[]).map(row=>({fecha:row.created_at,ventaId:order.codigo_pedido,anterior:row.estado_anterior||"",nuevo:row.estado_nuevo,usuario:row.usuario_id||"",observacion:row.observacion||""}));}
 export async function issueNativePrintCode(value:unknown){const order=await orderByCode(value),db=getSupabaseAdminClient();let code=order.codigo_impresion as string|undefined;if(!code)code=`B${new Date().getFullYear()}-${String(Date.now()).slice(-8)}`;const now=new Date().toISOString(),{error}=await db.from("pedidos").update({codigo_impresion:code,fecha_impresion:now,estado_boleta:"EMITIDA",updated_at:now}).eq("id",order.id);if(error)throw error;return{ok:true,mensaje:"Código de impresión generado.",codigo:code,fecha:now,reimpresion:Boolean(order.codigo_impresion)};}

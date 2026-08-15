@@ -45,6 +45,8 @@ export type Database = {
       procesar_entrega_cobro: { Args: { p_pedido_id: string; p_entrega: Record<string, unknown>; p_pago: Record<string, unknown>; p_idempotency_key: string }; Returns: Record<string, unknown> };
       obtener_consolidado_compra: { Args: { p_desde: string; p_hasta: string; p_pedido_ids: string[] | null }; Returns: { consolidado: Array<Record<string, unknown>>; origen: Array<Record<string, unknown>> } };
       bulk_update_orders: { Args: { p_pedido_ids: string[]; p_accion: string; p_payload: Record<string, unknown> }; Returns: Record<string, unknown> };
+      procesar_carga_masiva_stock: { Args: { p_items: Array<Record<string, unknown>>; p_usuario_id: string; p_idempotency_key: string }; Returns: Record<string, unknown> };
+      revertir_carga_masiva_stock: { Args: { p_lote_id: string; p_usuario_id: string; p_motivo: string }; Returns: Record<string, unknown> };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

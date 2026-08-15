@@ -110,6 +110,10 @@ type Summary = {
     valorTotalInventario: number;
 };
 type ApiRecord = { [key: string]: never };
+type BulkStockRow = { filaExcel: number; codigo: string; presentacion: string; cantidad: number; nuevoCosto: number | null; observacion: string };
+type BulkStockPreview = { filaExcel: number; codigo: string; producto: string; presentacion: string; factor: number; cantidad: number; stockActual: number; stockNuevo: number; costoActual: number; nuevoCosto: number | null };
+type BulkStockValidation = { ok: boolean; filas: BulkStockPreview[]; errores: Array<{ fila: number; mensaje: string }>; resumen: { productos: number; filas: number; cantidadPresentaciones: number; valorEstimado: number }; mensaje: string };
+type StockBatch = { loteId: string; codigoLote: string; fecha: string; estado: string; productos: number; cantidad: number; valor: number; motivoReversion?: string };
 type UserRecord = { usuario: string; originalUsuario?: string; nombre: string; password?: string; perfil: string; estado: string; comentarios: string; permisos: string[]; nuevo?: boolean };
 type FinanceRow = { id?: string; tipo: string; categoria: string; concepto?: string; monto?: number; unidad?: string; activo?: boolean; valores?: Record<string, number>; medios?: Record<string, string> };
 type PlanData = { filas: FinanceRow[]; resumen?: { ingresos?: number; gastos?: number } };
@@ -1275,6 +1279,7 @@ function Inventory({ products, call, refresh, notify, master }: {
     const [productForm, setProductForm] = useState({ codigo: "", nombre: "", unidad: "Unidades", grupo: "General", stockMin: 0, precioCosto: 0, precioVenta: 0 });
     const [lists, setLists] = useState({ unidades: ["Unidades"], grupos: ["General"] });
     const [income, setIncome] = useState({ codigo: "", fecha: today(), tipo: "INGRESO", cantidad: 1, observaciones: "" });
+    const [bulkRows, setBulkRows] = useState<BulkStockRow[]>([]), [bulkCheck, setBulkCheck] = useState<BulkStockValidation | null>(null), [bulkBusy, setBulkBusy] = useState(false), [bulkResult, setBulkResult] = useState(""), [batches, setBatches] = useState<StockBatch[]>([]);
     const activeProducts = useMemo(() => products.filter(p => Boolean(p.nombre?.trim())), [products]);
     const nextCode = useMemo(() => {
         const codes = activeProducts.map(p => /^(.*?)(\d+)$/.exec(p.codigo.trim())).filter(Boolean) as RegExpExecArray[];
@@ -1286,7 +1291,8 @@ function Inventory({ products, call, refresh, notify, master }: {
     const visible = activeProducts.filter(p => JSON.stringify(p).toLowerCase().includes(query.toLowerCase()));
     const loadHistory = useCallback(async () => {
         try {
-            setHistory(await call<ApiRecord[]>("obtenerHistorial", [{}]));
+            const [movementRows, batchRows] = await Promise.all([call<ApiRecord[]>("obtenerHistorial", [{}]), call<StockBatch[]>("obtenerLotesStock")]);
+            setHistory(movementRows); setBatches(batchRows);
         }
         catch (x) {
             notify(x instanceof Error ? x.message : "No se pudo cargar el historial");
@@ -1364,36 +1370,52 @@ function Inventory({ products, call, refresh, notify, master }: {
             notify(x instanceof Error ? x.message : "No se actualizó");
         }
     }
-    function downloadTemplate() { const content = "codigo;tipo;cantidad;factor;costo;fecha;observacion\nMAT-001;INGRESO;10;1;15.50;" + today() + ";Ingreso inicial"; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" })); a.download = "plantilla-carga-materiales.csv"; a.click(); }
+    async function downloadTemplate() {
+        setBulkBusy(true);
+        try {
+            const data = await call<Array<{ codigo: string; producto: string; presentacion: string; factor: number; stockPresentacion: number; costoActual: number }>>("obtenerPlantillaCargaMasiva");
+            const XLSX = await import("xlsx"), workbook = XLSX.utils.book_new();
+            const rows = data.map(row => ({ "Código": row.codigo, "Producto": row.producto, "Presentación": row.presentacion, "Factor": row.factor, "Stock actual": row.stockPresentacion, "Cantidad a ingresar": "", "Costo unitario actual": row.costoActual, "Nuevo costo unitario": "", "Observación": "" }));
+            const sheet = XLSX.utils.json_to_sheet(rows); sheet["!cols"] = [{ wch: 14 }, { wch: 38 }, { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 22 }, { wch: 22 }, { wch: 40 }];
+            XLSX.utils.book_append_sheet(workbook, sheet, "Carga de stock");
+            XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["INSTRUCCIONES"], ["Completa únicamente Cantidad a ingresar, Nuevo costo unitario y Observación."], ["La cantidad suma existencias; nunca reemplaza el stock actual."], ["Deja vacío o en cero lo que no deseas importar. No uses cantidades negativas."], ["No cambies códigos, presentaciones ni factores. Si el catálogo cambió, descarga otra plantilla."]]), "Instrucciones");
+            XLSX.writeFile(workbook, `plantilla-stock-${today()}.xlsx`);
+        } catch (x) { notify(x instanceof Error ? x.message : "No se pudo generar la plantilla"); }
+        finally { setBulkBusy(false); }
+    }
     async function upload(file?: File) {
         if (!file)
             return;
-        const text = await file.text(), lines = text.split(/\r?\n/).filter(Boolean), sep = lines[0]?.includes(";") ? ";" : ",";
-        const headers = lines.shift()?.split(sep).map(x => x.trim().toLowerCase()) || [];
-        const rows = lines.map((line, i) => { const v = line.split(sep); const get = (name: string) => v[headers.indexOf(name)] || ""; return { filaExcel: i + 2, codigo: get("codigo") || get("código"), tipo: get("tipo") || "INGRESO", cantidadCarga: Number(get("cantidad")), factor: Number(get("factor") || 1), costoCompra: Number(get("costo") || 0), fecha: get("fecha") || today(), observacion: get("observacion") || "Carga masiva NexoVenta" }; });
+        setBulkBusy(true); setBulkResult(""); setBulkCheck(null);
         try {
-            const check = await call<ApiRecord>("validarCargaMasivaInventario", [rows]);
-            if (!check.ok)
-                return notify(check.mensaje);
-            if (!confirm(check.mensaje + "\n¿Importar ahora?"))
-                return;
-            const result = await call<ApiRecord>("importarCargaMasivaInventario", [rows]);
-            notify(result.mensaje);
-            await refresh();
-            setTab("Inventario");
+            const XLSX = await import("xlsx"), workbook = XLSX.read(await file.arrayBuffer(), { type: "array" }), sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" }), clean = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+            const rows: BulkStockRow[] = raw.map((row, i) => { const normalized = new Map(Object.entries(row).map(([key, value]) => [clean(key), value])); return { filaExcel: i + 2, codigo: String(normalized.get("codigo") || ""), presentacion: String(normalized.get("presentacion") || ""), cantidad: Number(normalized.get("cantidad a ingresar") || 0), nuevoCosto: normalized.get("nuevo costo unitario") === "" ? null : Number(normalized.get("nuevo costo unitario")), observacion: String(normalized.get("observacion") || "") }; });
+            setBulkRows(rows); setBulkCheck(await call<BulkStockValidation>("validarCargaMasivaInventario", [rows]));
         }
         catch (x) {
-            notify(x instanceof Error ? x.message : "No se importó");
-        }
+            notify(x instanceof Error ? x.message : "No se pudo leer o validar el archivo");
+        } finally { setBulkBusy(false); }
+    }
+    async function confirmBulkImport() {
+        if (!bulkCheck?.ok || bulkBusy) return; setBulkBusy(true);
+        try { const result = await call<{ codigoLote?: string; mensaje?: string }>("importarCargaMasivaInventario", [bulkRows, crypto.randomUUID()]); const message = result.mensaje || `Lote ${result.codigoLote} importado correctamente.`; setBulkResult(message); notify(message); setBulkRows([]); setBulkCheck(null); await refresh(); await loadHistory(); }
+        catch (x) { notify(x instanceof Error ? x.message : "No se importó el lote"); }
+        finally { setBulkBusy(false); }
+    }
+    async function reverseBatch(batch: StockBatch) {
+        const reason = prompt(`Motivo obligatorio para revertir ${batch.codigoLote}:`); if (!reason) return;
+        try { const result = await call<{ mensaje?: string }>("revertirCargaMasivaStock", [batch.loteId, reason]); notify(result.mensaje || "Lote revertido correctamente."); await refresh(); await loadHistory(); }
+        catch (x) { notify(x instanceof Error ? x.message : "No se pudo revertir el lote"); }
     }
     const table = <section className="panel data-panel"><div className="table-wrap"><table><thead><tr><th>SKU</th><th>Material</th><th>Grupo</th><th>Stock</th><th>Mínimo</th><th>Costo</th><th>Venta</th><th></th></tr></thead><tbody>{visible.map(p => <tr key={p.codigo}><td><b>{p.codigo}</b></td><td>{p.nombre}<br /><small>{p.unidad}</small></td><td>{p.grupo}</td><td><b>{p.stock}</b></td><td>{p.stockMin}</td><td>{money(p.precioCosto)}</td><td>{money(p.precioVenta)}</td><td>{master && <button onClick={() => { setSelected({ ...p }); setTab("Editar"); }}>Editar</button>}</td></tr>)}</tbody></table></div></section>;
-    return <div><Heading eyebrow="MATERIALES Y ALMACÉN" title="Materiales" text="Creación, ingresos, carga masiva, edición, inventario e historial conectados a Sheets."/><div className="materials-tabs">{tabs.map(x => <button key={x} className={tab === x ? "active" : ""} onClick={() => setTab(x)}>{x}</button>)}</div>
+    return <div><Heading eyebrow="MATERIALES Y ALMACÉN" title="Materiales" text="Catálogo, stock, costos, lotes e historial operados directamente en Supabase."/><div className="materials-tabs">{tabs.map(x => <button key={x} className={tab === x ? "active" : ""} onClick={() => setTab(x)}>{x}</button>)}</div>
     {tab === "Inventario" && <><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar material, SKU o grupo…"/></label><button onClick={refresh}>↻ Actualizar</button></section>{table}</>}
     {tab === "Registrar material" && <form className="panel material-form" onSubmit={create}><h3>Registrar nuevo material</h3><div className="form-row"><label>Código<input required value={productForm.codigo} onChange={e => setProductForm({ ...productForm, codigo: e.target.value })}/></label><label>Nombre<input required value={productForm.nombre} onChange={e => setProductForm({ ...productForm, nombre: e.target.value })}/></label></div><div className="form-row"><label>Unidad<select required value={productForm.unidad} onChange={e => setProductForm({ ...productForm, unidad: e.target.value })}>{lists.unidades.map(x => <option key={x}>{x}</option>)}</select></label><label>Grupo<select required value={productForm.grupo} onChange={e => setProductForm({ ...productForm, grupo: e.target.value })}>{lists.grupos.map(x => <option key={x}>{x}</option>)}</select></label></div><div className="form-row"><label>Stock mínimo<input type="number" value={productForm.stockMin} onChange={e => setProductForm({ ...productForm, stockMin: Number(e.target.value) })}/></label><label>Precio costo<input type="number" step=".01" value={productForm.precioCosto} onChange={e => setProductForm({ ...productForm, precioCosto: Number(e.target.value) })}/></label></div><label>Precio venta<input type="number" step=".01" value={productForm.precioVenta} onChange={e => setProductForm({ ...productForm, precioVenta: Number(e.target.value) })}/></label><button className="primary">Guardar material</button></form>}
     {tab === "Ingresar stock" && <form className="panel material-form" onSubmit={saveIncome}><h3>Ingreso de materiales</h3><label>Buscar material<input required list="stock-materials" value={income.codigo} onChange={e => setIncome({ ...income, codigo: e.target.value })} placeholder="Escribe código o nombre…" autoComplete="off"/><datalist id="stock-materials">{activeProducts.map(p => <option key={p.codigo} value={p.codigo}>{p.nombre} · stock {p.stock}</option>)}</datalist><small>Escribe parte del código o nombre y selecciona una coincidencia.</small></label><div className="form-row"><label>Fecha<input type="date" required value={income.fecha} onChange={e => setIncome({ ...income, fecha: e.target.value })}/></label><label>Tipo<select value={income.tipo} onChange={e => setIncome({ ...income, tipo: e.target.value })}><option>INGRESO</option><option>AJUSTE_POSITIVO</option><option>AJUSTE_NEGATIVO</option></select></label></div><label>Cantidad<input type="number" min=".01" step=".01" required value={income.cantidad} onChange={e => setIncome({ ...income, cantidad: Number(e.target.value) })}/></label><label>Observaciones<textarea value={income.observaciones} onChange={e => setIncome({ ...income, observaciones: e.target.value })}/></label><button className="primary">Registrar ingreso</button></form>}
-    {tab === "Carga masiva" && <section className="panel bulk-zone"><h3>Carga masiva</h3><p>No necesitas un Excel nuevo. Descarga la plantilla, complétala y guárdala como CSV.</p><div><button onClick={downloadTemplate}>Descargar plantilla</button><label className="upload-button">Seleccionar CSV<input type="file" accept=".csv,.txt" onChange={e => upload(e.target.files?.[0])}/></label></div></section>}
+    {tab === "Carga masiva" && <section className="panel bulk-zone"><div className="panel-title"><div><h3>Carga masiva de stock</h3><p>Descarga el catálogo vigente, completa solo las columnas de ingreso y valida antes de guardar.</p></div><span className="source-pill">SUPABASE</span></div><div className="bulk-actions"><button disabled={bulkBusy} onClick={downloadTemplate}>↓ Descargar plantilla Excel</button><label className="upload-button">{bulkBusy ? "Procesando…" : "Seleccionar archivo"}<input type="file" accept=".xlsx,.xls,.csv" onChange={e => upload(e.target.files?.[0])}/></label></div>{bulkResult && <div className="bulk-success">✓ {bulkResult}</div>}{bulkCheck && <><div className="bulk-summary"><article><small>Materiales</small><b>{bulkCheck.resumen.productos}</b></article><article><small>Filas válidas</small><b>{bulkCheck.resumen.filas}</b></article><article><small>Presentaciones</small><b>{bulkCheck.resumen.cantidadPresentaciones}</b></article><article><small>Valor estimado</small><b>{money(bulkCheck.resumen.valorEstimado)}</b></article></div>{bulkCheck.errores.length > 0 && <div className="bulk-errors"><b>Corrige el archivo antes de importar</b>{bulkCheck.errores.map((error, i) => <p key={`${error.fila}-${i}`}>Fila {error.fila}: {error.mensaje}</p>)}</div>}{bulkCheck.filas.length > 0 && <div className="table-wrap bulk-preview"><table><thead><tr><th>Código</th><th>Producto / presentación</th><th>Stock actual</th><th>Ingreso</th><th>Nuevo stock</th><th>Costo</th></tr></thead><tbody>{bulkCheck.filas.map(row => <tr key={`${row.codigo}-${row.presentacion}`}><td><b>{row.codigo}</b></td><td>{row.producto}<br/><small>{row.presentacion} · x{row.factor}</small></td><td>{row.stockActual}</td><td className="bulk-positive">+{row.cantidad}</td><td><b>{row.stockNuevo}</b></td><td>{money(row.nuevoCosto || row.costoActual)}</td></tr>)}</tbody></table></div>}<div className="bulk-confirm"><span>{bulkCheck.ok ? "La importación se guardará como una sola transacción." : "No se modificó el inventario."}</span><button disabled={!bulkCheck.ok || bulkBusy} className="primary" onClick={confirmBulkImport}>Confirmar ingreso de stock</button></div></>}</section>}
     {tab === "Editar" && <>{!selected ? <><section className="section-tools"><label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Busca y selecciona un material…"/></label></section>{table}</> : <form className="panel material-form" onSubmit={saveEdit}><h3>Editar {selected.codigo}</h3><label>Nombre<input value={selected.nombre} onChange={e => setSelected({ ...selected, nombre: e.target.value })}/></label><div className="form-row"><label>Unidad<input value={selected.unidad} onChange={e => setSelected({ ...selected, unidad: e.target.value })}/></label><label>Grupo<input value={selected.grupo} onChange={e => setSelected({ ...selected, grupo: e.target.value })}/></label></div><div className="form-row"><label>Stock mínimo<input type="number" value={selected.stockMin} onChange={e => setSelected({ ...selected, stockMin: Number(e.target.value) })}/></label><label>Precio costo<input type="number" step=".01" value={selected.precioCosto} onChange={e => setSelected({ ...selected, precioCosto: Number(e.target.value) })}/></label></div><label>Precio venta<input type="number" step=".01" value={selected.precioVenta} onChange={e => setSelected({ ...selected, precioVenta: Number(e.target.value) })}/></label><div><button type="button" onClick={() => setSelected(null)}>Cancelar</button><button className="primary">Guardar cambios</button></div></form>}</>}
-    {tab === "Historial" && <section className="panel data-panel"><div className="panel-title"><div><h3>Historial de movimientos</h3><p>Ingresos, salidas, ajustes y ventas</p></div><button onClick={loadHistory}>↻ Actualizar</button></div><div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Código</th><th>Material</th><th>Tipo</th><th>Cantidad</th><th>Cliente / observación</th></tr></thead><tbody>{history.map((h, i) => <tr key={i}><td>{h.fecha}</td><td>{h.codigo}</td><td>{h.producto}</td><td><span className="table-status">{h.tipo}</span></td><td>{h.cantidad}</td><td>{h.cliente || h.observaciones}</td></tr>)}</tbody></table></div></section>}
+    {tab === "Historial" && <><section className="panel data-panel batch-history"><div className="panel-title"><div><h3>Lotes de carga</h3><p>Consulta y reversión auditada de ingresos masivos</p></div><button onClick={loadHistory}>↻ Actualizar</button></div><div className="table-wrap"><table><thead><tr><th>Lote</th><th>Fecha</th><th>Productos</th><th>Cantidad</th><th>Valor</th><th>Estado</th><th></th></tr></thead><tbody>{batches.map(batch => <tr key={batch.loteId}><td><b>{batch.codigoLote}</b></td><td>{new Date(batch.fecha).toLocaleString("es-PE")}</td><td>{batch.productos}</td><td>{batch.cantidad}</td><td>{money(batch.valor)}</td><td><span className="table-status">{batch.estado}</span></td><td>{master && batch.estado === "APLICADO" && <button className="danger-lite" onClick={() => reverseBatch(batch)}>Revertir</button>}</td></tr>)}</tbody></table></div></section><section className="panel data-panel"><div className="panel-title"><div><h3>Historial de movimientos</h3><p>Ingresos, salidas, ajustes y ventas</p></div></div><div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Código</th><th>Material</th><th>Tipo</th><th>Cantidad</th><th>Cliente / observación</th></tr></thead><tbody>{history.map((h, i) => <tr key={i}><td>{h.fecha}</td><td>{h.codigo}</td><td>{h.producto}</td><td><span className="table-status">{h.tipo}</span></td><td>{h.cantidad}</td><td>{h.cliente || h.observaciones}</td></tr>)}</tbody></table></div></section></>}
   </div>;
 }
 function Finance({ call, notify }: {
