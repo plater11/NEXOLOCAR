@@ -42,7 +42,7 @@ begin
   v_entity_id := nullif(v_data->>'id', '')::uuid;
   v_type := case tg_table_name
     when 'pagos' then 'PAYMENT_REGISTERED'
-    when 'gastos' then case when tg_op = 'INSERT' then 'EXPENSE_CREATED' else 'EXPENSE_' || coalesce(new.estado::text, 'UPDATED') end
+    when 'gastos' then case when tg_op = 'INSERT' then 'EXPENSE_CREATED' else 'EXPENSE_' || coalesce(v_data->>'estado', 'UPDATED') end
     when 'rendiciones' then 'RENDITION_CLOSED'
     when 'movimientos_inventario' then 'STOCK_ADJUSTED'
     else upper(tg_table_name) || '_UPDATED'

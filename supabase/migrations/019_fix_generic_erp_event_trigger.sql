@@ -1,4 +1,5 @@
--- Fix enum coercion when the expense event trigger handles an update.
+-- The trigger is shared by tables with different row shapes. Read optional
+-- fields from JSON instead of dereferencing columns that may not exist.
 create or replace function public.emitir_evento_erp_por_cambio() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
