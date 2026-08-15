@@ -496,10 +496,22 @@ export default function Home() {
         queueMicrotask(state);
         window.addEventListener("online", state);
         window.addEventListener("offline", state);
-        if ("serviceWorker" in navigator)
-            navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+        let reloadForUpdate: (() => void) | undefined;
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then(registration => registration.update()).catch(() => undefined);
+            reloadForUpdate = () => {
+                if (sessionStorage.getItem("nexoventa_sw_v5_reloaded") === "1") return;
+                sessionStorage.setItem("nexoventa_sw_v5_reloaded", "1");
+                window.location.reload();
+            };
+            navigator.serviceWorker.addEventListener("controllerchange", reloadForUpdate);
+        }
         void migrateLegacySaleQueue();
-        return () => { window.removeEventListener("online", state); window.removeEventListener("offline", state); };
+        return () => {
+            window.removeEventListener("online", state);
+            window.removeEventListener("offline", state);
+            if (reloadForUpdate) navigator.serviceWorker.removeEventListener("controllerchange", reloadForUpdate);
+        };
     }, []);
     useEffect(() => {
         const isZeroNumber = (target: EventTarget | null): target is HTMLInputElement => target instanceof HTMLInputElement && target.type === "number" && Number(target.value) === 0;
