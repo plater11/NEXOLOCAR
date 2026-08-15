@@ -138,7 +138,7 @@ export async function processNativeCollection(token: string, payload: Collection
   const items = (details || []).map(detail => { const requested = number(detail.cantidad_unidades_base), presentationQuantity = number(detail.cantidad_presentacion), source = delivered?.find(item => productIds.get(String(item.codigo || "")) === detail.producto_id), factor = presentationQuantity > 0 ? requested / presentationQuantity : 1; return { producto_id: detail.producto_id, cantidad_pedida: requested, cantidad_entregada: source ? number(source.cantidadEntregada) * factor : requested }; });
   const medios = [["EFECTIVO", payload.efectivo], ["YAPE", payload.yape], ["PLIN", payload.plin], ["TRANSFERENCIA", payload.transferencia], ["OTRO", number(payload.pos) + number(payload.otros)]].map(([medio, monto]) => ({ medio, monto: number(monto) })).filter(item => item.monto > 0);
   const requestId = String(payload.solicitudId || crypto.randomUUID());
-  const { error } = await getSupabaseServerClient(token).rpc("procesar_entrega_cobro", { p_pedido_id: order.id, p_entrega: { estado: deliveryState(payload.estadoEntrega), fecha_entrega: payload.fechaEntrega || new Date().toISOString(), observacion: String(payload.observacion || ""), jornada_id: String(payload.jornadaId || ""), items }, p_pago: { medios }, p_idempotency_key: requestId });
+  const { error } = await getSupabaseServerClient(token).rpc("procesar_entrega_cobro", { p_pedido_id: order.id, p_entrega: { estado: deliveryState(payload.estadoEntrega), fecha_entrega: payload.fechaEntrega || new Date().toISOString(), observacion: String(payload.observacion || ""), jornada_id: String(payload.jornadaId || ""), idempotency_key: `${requestId}:ENTREGA`, items }, p_pago: { medios }, p_idempotency_key: requestId });
   if (error) throw error; return "Entrega y cobranza registradas correctamente.";
 }
 
@@ -288,8 +288,11 @@ export async function registerNativeExpense(userId: string, payload: ExpensePayl
   const idempotency = String(payload.solicitudId || crypto.randomUUID());
   const row = { fecha: String(payload.fecha || limaToday()), categoria: String(payload.partida || payload.categoria || "OTROS"), subcategoria: String(payload.subcategoria || "") || null, descripcion: String(payload.descripcion || "Gasto operativo"), monto: number(payload.importe ?? payload.monto), medio_pago: String(payload.canal || payload.medioPago || "EFECTIVO").toUpperCase(), origen_dinero: String(payload.origenDinero || "FONDO DE RUTA"), proveedor: String(payload.proveedor || "") || null, comprobante_url: String(payload.comprobanteUrl || "") || null, estado: "PENDIENTE_APROBACION", usuario_id: userId, repartidor_id: userId, idempotency_key: idempotency };
   if (row.monto <= 0) throw new Error("El importe debe ser mayor que cero.");
-  const admin = getSupabaseAdminClient(); const { error } = await admin.from("gastos").upsert(row, { onConflict: "idempotency_key", ignoreDuplicates: true }); if (error) throw error;
-  await admin.from("eventos").insert({ tipo: "GASTO_RUTA", entidad: "GASTO", entidad_id: null, descripcion: `${row.categoria} · ${row.descripcion}`, importe: row.monto, usuario_id: userId, metadata: { idempotency } });
+  const admin = getSupabaseAdminClient();
+  const created = await admin.from("gastos").upsert(row, { onConflict: "idempotency_key", ignoreDuplicates: true }).select("id").maybeSingle();
+  if (created.error) throw created.error;
+  if (!created.data) return "Gasto ya registrado; no se creó un duplicado.";
+  await admin.from("eventos").insert({ tipo: "EXPENSE_CREATED", entidad: "GASTO", entidad_id: created.data.id, descripcion: `${row.categoria} · ${row.descripcion}`, importe: row.monto, usuario_id: userId, metadata: { idempotency } });
   return "Gasto registrado. Pendiente de aprobación financiera.";
 }
 
@@ -306,7 +309,7 @@ export async function resolveNativeExpense(userId: string, payload: ExpensePaylo
   if (!state) throw new Error("Estado de aprobación inválido.");
   const id = String(payload.id || payload.solicitudId || "");
   const admin = getSupabaseAdminClient(); const { data, error } = await admin.from("gastos").update({ estado: state, updated_at: new Date().toISOString() }).eq("id", id).select("*").maybeSingle(); if (error || !data) throw error || new Error("Gasto no encontrado.");
-  await admin.from("eventos").insert({ tipo: `GASTO_${state}`, entidad: "GASTO", entidad_id: data.id, descripcion: String(payload.observacion || state), importe: number(data.monto), usuario_id: userId, metadata: {} });
+  await admin.from("eventos").insert({ tipo: `EXPENSE_${state}`, entidad: "GASTO", entidad_id: data.id, descripcion: String(payload.observacion || state), importe: number(data.monto), usuario_id: userId, metadata: {} });
   return `Gasto ${state.toLowerCase()} correctamente.`;
 }
 

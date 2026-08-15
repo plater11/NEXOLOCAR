@@ -2,6 +2,7 @@
 import { FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { enqueueOperation, migrateLegacySaleQueue, synchronizeOperations } from "../lib/offline/queue";
 import { getSupabaseBrowserClient } from "../lib/supabase/client";
+import { eventForMutation, refreshRelatedModules, type ErpInvalidation } from "../lib/erp-sync";
 import "./birthday.css";
 import "./sales-enhancements.css";
 import "./sales-fixes.css";
@@ -321,6 +322,11 @@ export default function Home() {
     const [dataSourceLabel, setDataSourceLabel] = useState("SHEETS");
     useEffect(() => { void fetch("/api/data-source", { cache: "no-store" }).then(response => response.json()).then((status: { label?: string }) => setDataSourceLabel(status.label || "SHEETS")).catch(() => setDataSourceLabel("SHEETS")); }, []);
     const notify = useCallback((m: string) => { setToast(m); window.setTimeout(() => setToast(""), 3200); }, []);
+    useEffect(() => {
+        const show = (event: Event) => notify(String((event as CustomEvent<string>).detail || "Operación registrada"));
+        window.addEventListener("nexo:toast", show);
+        return () => window.removeEventListener("nexo:toast", show);
+    }, [notify]);
     const call = useCallback(async <T,>(fn: string, args: unknown[] = []) => {
         const visible = !READ_ONLY.has(fn);
         if (visible)
@@ -334,7 +340,11 @@ export default function Home() {
                 return offlineResult(fn) as T;
             }
             const result = await api<T>(fn, args, session?.token || "");
-            if (visible) window.dispatchEvent(new CustomEvent("nexo:activity"));
+            if (visible) {
+                const eventType = eventForMutation(fn, args);
+                if (eventType) refreshRelatedModules(eventType);
+                window.dispatchEvent(new CustomEvent("nexo:activity"));
+            }
             return result;
         }
         catch (error) {
@@ -394,6 +404,30 @@ export default function Home() {
             setCollectionsLoading(false);
         }
     }, [call, notify, session]);
+    const refreshSharedData = useCallback(async (modules: string[]) => {
+        if (!session || !navigator.onLine) return;
+        const jobs: Promise<unknown>[] = [];
+        if (modules.some(module => ["dashboard", "orders"].includes(module))) {
+            jobs.push(call<Order[]>("obtenerEmisiones", [{}]).then(rows => {
+                const unique = dedupeOrders(rows || []); setOrders(unique); cacheSet("nexo_orders", unique);
+            }));
+        }
+        if (modules.includes("dashboard")) jobs.push(call<Summary>("obtenerResumen").then(value => { setSummary(value); cacheSet("nexo_summary", value); }));
+        if (modules.some(module => ["collections", "renditions", "finance"].includes(module))) jobs.push(refreshCollections());
+        if (modules.includes("inventory")) jobs.push(refreshProducts());
+        if (modules.includes("activity")) jobs.push(refreshActivity());
+        await Promise.allSettled(jobs);
+    }, [call, refreshActivity, refreshCollections, refreshProducts, session]);
+    useEffect(() => {
+        let timer = 0;
+        const invalidated = (event: Event) => {
+            const detail = (event as CustomEvent<ErpInvalidation>).detail;
+            window.clearTimeout(timer);
+            timer = window.setTimeout(() => void refreshSharedData(detail?.modules || ["dashboard", "orders", "collections", "finance", "inventory", "renditions", "activity"]), 120);
+        };
+        window.addEventListener("nexo:data-invalidated", invalidated);
+        return () => { window.clearTimeout(timer); window.removeEventListener("nexo:data-invalidated", invalidated); };
+    }, [refreshSharedData]);
     const refresh = useCallback(async () => {
         if (!session || !navigator.onLine)
             return;
@@ -510,7 +544,7 @@ export default function Home() {
         let refreshTimer = 0;
         const scheduleRefresh = () => {
             window.clearTimeout(refreshTimer);
-            refreshTimer = window.setTimeout(() => void refresh(), 350);
+            refreshTimer = window.setTimeout(() => void refreshSharedData(["dashboard", "orders", "collections", "finance", "inventory", "renditions", "activity"]), 350);
         };
         const channel = db.channel("nexoventa-operation")
             .on("postgres_changes", { event: "*", schema: "public", table: "clientes" }, scheduleRefresh)
@@ -518,10 +552,14 @@ export default function Home() {
             .on("postgres_changes", { event: "*", schema: "public", table: "stock_actual" }, scheduleRefresh)
             .on("postgres_changes", { event: "*", schema: "public", table: "pedidos" }, scheduleRefresh)
             .on("postgres_changes", { event: "*", schema: "public", table: "pagos" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "gastos" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "entregas" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "eventos" }, scheduleRefresh)
+            .on("postgres_changes", { event: "*", schema: "public", table: "rendiciones" }, scheduleRefresh)
             .on("postgres_changes", { event: "*", schema: "public", table: "jornadas" }, scheduleRefresh)
             .subscribe();
         return () => { window.clearTimeout(refreshTimer); void db.removeChannel(channel); };
-    }, [dataSourceLabel, online, refresh, session?.token]);
+    }, [dataSourceLabel, online, refreshSharedData, session?.token]);
     useEffect(() => {
         if (!session || canViewModule(session, active))
             return;
@@ -546,7 +584,8 @@ export default function Home() {
     const navigate = (label: string) => { setActive(label); setMobileMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); };
     const primaryMobile = (session.perfil === "PREVENTA" ? ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"] : ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"]).filter(allowed);
     const secondaryMobile = menu.filter(label => allowed(label) && !primaryMobile.includes(label));
-    return <main className={`app-shell role-${session.perfil.toLowerCase()} ${pending ? "is-processing" : ""}`}><aside className="sidebar"><div className="brand"><span className="brand-mark">N</span><div><strong>NexoVenta</strong><small>{dataSourceLabel}</small></div></div><nav>{menu.filter(allowed).map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span>{label}</button>)}</nav><div className="profile"><span>{session.nombre.slice(0, 2).toUpperCase()}</span><div><b>{session.nombre}</b><small>{session.perfil}</small></div><button onClick={logout} title="Cerrar sesión">↪</button></div></aside><section className="workspace"><header className="topbar"><div><small>{new Date().toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long" })}</small><h1>{active}</h1></div><div className="top-actions"><span className={`sync-pill ${online ? "" : "offline"}`}>● {online ? (pending ? "Procesando solicitud…" : loading ? "Actualizando…" : `En línea · ${dataSourceLabel}`) : "Sin señal · modo local"}</span><button onClick={refresh} disabled={pending > 0}>↻ Actualizar</button></div></header><div className="content">{active === "Inicio" && <Dashboard summary={summary} orders={orders} clients={clients} receivables={collectionRows} activities={activities} onNavigate={navigate} session={session}/>}{active === "Clientes" && <Clients clients={clients} call={call} refresh={refresh} notify={notify} online={online}/>}{active === "Preventa" && <Sales products={products} clients={clients} call={call} refreshProducts={refreshProducts} notify={notify} online={online}/>}{active === "Pedidos y emisión" && <Orders orders={orders} call={call} refresh={refresh} notify={notify} onOrderUpdated={updated => setOrders(rows => dedupeOrders(rows.map(row => row.ventaId === updated.ventaId ? updated : row)))}/>}{active === "Centro de rendiciones" && <Collections rows={collectionRows} clients={clients} loading={collectionsLoading} load={refreshCollections} call={call} notify={notify}/>}{active === "Productos e inventario" && <Inventory products={products} call={call} refresh={refresh} notify={notify} master={session.perfil === "MASTER"}/>}{active === "Gestión financiera" && <Finance call={call} notify={notify}/>}{active === "Reportes" && <Reports call={call} notify={notify}/>}{active === "Análisis" && <Analytics call={call} notify={notify}/>}{active === "Configuración" && <Settings call={call} notify={notify} session={session}/>}</div></section><nav className="mobile-nav" aria-label="Navegación principal">{primaryMobile.map(label => <button key={label} className={`${active === label ? "active" : ""} ${label === "Preventa" ? "sale" : ""}`} onClick={() => navigate(label)} aria-label={label}><span>{icons[label]}</span><small>{label === "Pedidos y emisión" ? "Pedidos" : label}</small></button>)}<button className={secondaryMobile.includes(active) || mobileMenuOpen ? "active" : ""} onClick={() => setMobileMenuOpen(v => !v)} aria-label="Abrir más opciones" aria-expanded={mobileMenuOpen}><span>☰</span><small>Más</small></button></nav>{mobileMenuOpen && <div className="mobile-more-backdrop" onClick={() => setMobileMenuOpen(false)}><section className="mobile-more" onClick={e => e.stopPropagation()}><div className="mobile-more-head"><div><strong>Menú de NexoVenta</strong><small>{session.nombre} · {session.perfil}</small></div><button onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menú">×</button></div><div className="mobile-more-grid">{secondaryMobile.map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span><b>{label}</b></button>)}</div><button className="mobile-logout" onClick={logout}>↪ Cerrar sesión</button></section></div>}{pending > 0 && <div className="processing-banner"><i></i><span><b>Procesando solicitud</b><small>No cierres la ventana ni vuelvas a presionar el botón.</small></span></div>}{toast && <div className="toast">{toast}</div>}</main>;
+    const toastKind = /error|no se pudo|no se registr|inválid|revisa|indica|falt/i.test(toast) ? "error" : /pendiente|observad|advert/i.test(toast) ? "warning" : "success";
+    return <main className={`app-shell role-${session.perfil.toLowerCase()} ${pending ? "is-processing" : ""}`}><aside className="sidebar"><div className="brand"><span className="brand-mark">N</span><div><strong>NexoVenta</strong><small>{dataSourceLabel}</small></div></div><nav>{menu.filter(allowed).map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span>{label}</button>)}</nav><div className="profile"><span>{session.nombre.slice(0, 2).toUpperCase()}</span><div><b>{session.nombre}</b><small>{session.perfil}</small></div><button onClick={logout} title="Cerrar sesión">↪</button></div></aside><section className="workspace"><header className="topbar"><div><small>{new Date().toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Lima" })}</small><h1>{active}</h1></div><div className="top-actions"><span className={`sync-pill ${online ? "" : "offline"}`}>● {online ? (pending ? "Procesando solicitud…" : loading ? "Actualizando…" : `En línea · ${dataSourceLabel}`) : "Sin señal · modo local"}</span><button onClick={refresh} disabled={pending > 0}>↻ Actualizar</button></div></header><div className="content">{active === "Inicio" && <Dashboard summary={summary} orders={orders} clients={clients} receivables={collectionRows} activities={activities} onNavigate={navigate} session={session}/>}{active === "Clientes" && <Clients clients={clients} call={call} refresh={refresh} notify={notify} online={online}/>}{active === "Preventa" && <Sales products={products} clients={clients} call={call} refreshProducts={refreshProducts} notify={notify} online={online}/>}{active === "Pedidos y emisión" && <Orders orders={orders} call={call} refresh={refresh} notify={notify} onOrderUpdated={updated => setOrders(rows => dedupeOrders(rows.map(row => row.ventaId === updated.ventaId ? updated : row)))}/>}{active === "Centro de rendiciones" && <Collections rows={collectionRows} clients={clients} loading={collectionsLoading} load={refreshCollections} call={call} notify={notify}/>}{active === "Productos e inventario" && <Inventory products={products} call={call} refresh={refresh} notify={notify} master={session.perfil === "MASTER"}/>}{active === "Gestión financiera" && <Finance call={call} notify={notify}/>}{active === "Reportes" && <Reports call={call} notify={notify}/>}{active === "Análisis" && <Analytics call={call} notify={notify}/>}{active === "Configuración" && <Settings call={call} notify={notify} session={session}/>}</div></section><nav className="mobile-nav" aria-label="Navegación principal">{primaryMobile.map(label => <button key={label} className={`${active === label ? "active" : ""} ${label === "Preventa" ? "sale" : ""}`} onClick={() => navigate(label)} aria-label={label}><span>{icons[label]}</span><small>{label === "Pedidos y emisión" ? "Pedidos" : label}</small></button>)}<button className={secondaryMobile.includes(active) || mobileMenuOpen ? "active" : ""} onClick={() => setMobileMenuOpen(v => !v)} aria-label="Abrir más opciones" aria-expanded={mobileMenuOpen}><span>☰</span><small>Más</small></button></nav>{mobileMenuOpen && <div className="mobile-more-backdrop" onClick={() => setMobileMenuOpen(false)}><section className="mobile-more" onClick={e => e.stopPropagation()}><div className="mobile-more-head"><div><strong>Menú de NexoVenta</strong><small>{session.nombre} · {session.perfil}</small></div><button onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menú">×</button></div><div className="mobile-more-grid">{secondaryMobile.map(label => <button key={label} className={active === label ? "active" : ""} onClick={() => navigate(label)}><span>{icons[label]}</span><b>{label}</b></button>)}</div><button className="mobile-logout" onClick={logout}>↪ Cerrar sesión</button></section></div>}{pending > 0 && <div className="processing-banner"><i></i><span><b>Procesando solicitud</b><small>No cierres la ventana ni vuelvas a presionar el botón.</small></span></div>}{toast && <div className={`toast ${toastKind}`} role={toastKind === "error" ? "alert" : "status"}>{toastKind === "success" ? "✓ " : toastKind === "error" ? "✕ " : "⚠ "}{toast}</div>}</main>;
 }
 function Heading({ eyebrow, title, text, children }: {
     eyebrow: string;
@@ -617,7 +656,8 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
             const envelope = await response.json() as { ok?: boolean; message?: string };
             if (!response.ok || !envelope.ok) throw new Error(envelope.message || "No se pudo cerrar el período.");
             setCloseOpen(false);
-            window.location.reload();
+            refreshRelatedModules("PERIOD_CLOSED");
+            window.dispatchEvent(new CustomEvent("nexo:toast", { detail: "Período cerrado correctamente" }));
         } catch (error) { window.alert(error instanceof Error ? error.message : "No se pudo cerrar el período."); }
         finally { setClosingPeriod(false); }
     };
@@ -1590,6 +1630,14 @@ function Finance({ call, notify }: {
         finally { setResolvingExpense(""); }
     }
     useEffect(() => { queueMicrotask(() => void load()); }, [load]);
+    useEffect(() => {
+        const invalidated = (event: Event) => {
+            const detail = (event as CustomEvent<ErpInvalidation>).detail;
+            if (detail?.modules.includes("finance")) void load();
+        };
+        window.addEventListener("nexo:data-invalidated", invalidated);
+        return () => window.removeEventListener("nexo:data-invalidated", invalidated);
+    }, [load]);
     function openGoals() {
         const planRows = plan?.filas || [];
         const objetivo = planRows.filter((row: FinanceRow) => String(row.tipo || "").includes("INGRESO") || String(row.categoria || "").toUpperCase() === "VENTAS").reduce((sum: number, row: FinanceRow) => sum + Number(row.monto || 0), 0);

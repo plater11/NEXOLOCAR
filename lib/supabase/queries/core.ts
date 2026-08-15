@@ -125,21 +125,21 @@ export async function operationalSummary() {
   for (const result of [orderResult, paymentResult, renditionResult, periodResult, budgetResult, inventoryResult]) if (result.error) throw result.error;
   const stockMap = new Map((stock || []).map(row => [row.producto_id, Number(row.stock_fisico)]));
   const withStock = (products || []).filter(product => (stockMap.get(product.id) || 0) > 0).length;
-  const { data: deliveries, error: deliveryError } = await db.from("entregas").select("pedido_id").in("estado", ["ENTREGA_COMPLETA", "ENTREGA_PARCIAL"]).gte("fecha_entrega", `${limaDay}T00:00:00-05:00`).lte("fecha_entrega", `${limaDay}T23:59:59-05:00`);
+  const { data: deliveries, error: deliveryError } = await db.from("entregas").select("pedido_id,fecha_entrega").in("estado", ["ENTREGA_COMPLETA", "ENTREGA_PARCIAL"]).gte("fecha_entrega", from).lt("fecha_entrega", nextPeriod);
   if (deliveryError) throw deliveryError;
   const deliveredIds = [...new Set((deliveries || []).map(row => row.pedido_id))];
-  const deliveredResult = deliveredIds.length ? await db.from("pedidos").select("id,total").in("id", deliveredIds) : { data: [], error: null };
-  if (deliveredResult.error) throw deliveredResult.error;
+  const deliveredTodayIds = new Set((deliveries || []).filter(row => String(row.fecha_entrega).slice(0, 10) === limaDay).map(row => row.pedido_id));
   const orders = orderResult.data || [];
   const payments = paymentResult.data || [];
-  const monthOrders = orders.filter(row => String(row.fecha) >= from && String(row.fecha) < nextPeriod);
+  const monthOrders = orders.filter(row => deliveredIds.includes(row.id));
   const monthPayments = payments.filter(row => String(row.fecha) >= from && String(row.fecha) < nextPeriod);
   const salesMonth = monthOrders.reduce((sum, row) => sum + Number(row.total || 0), 0);
-  const salesToday = monthOrders.filter(row => String(row.fecha).slice(0, 10) === limaDay).reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const salesToday = monthOrders.filter(row => deliveredTodayIds.has(row.id)).reduce((sum, row) => sum + Number(row.total || 0), 0);
   const collectedMonth = monthPayments.reduce((sum, row) => sum + Number(row.monto || 0), 0);
   const paidByOrder = new Map<string, number>();
   payments.forEach(row => paidByOrder.set(row.pedido_id, (paidByOrder.get(row.pedido_id) || 0) + Number(row.monto || 0)));
-  const receivableRows = orders.filter(row => Math.max(0, Number(row.total || 0) - (paidByOrder.get(row.id) || 0)) > .01);
+  const deliveredOrderIds = new Set(orders.filter(row => row.estado_operativo === "ENTREGADO" || deliveredIds.includes(row.id)).map(row => row.id));
+  const receivableRows = orders.filter(row => deliveredOrderIds.has(row.id) && Math.max(0, Number(row.total || 0) - (paidByOrder.get(row.id) || 0)) > .01);
   const receivable = receivableRows.reduce((sum, row) => sum + Math.max(0, Number(row.total || 0) - (paidByOrder.get(row.id) || 0)), 0);
   const urgentReceivables = receivableRows.filter(row => row.estado_cobranza === "COBRANZA_URGENTE");
   const productCost = new Map((products || []).map(row => [row.id, Number(row.costo_actual || 0)]));
@@ -167,8 +167,8 @@ export async function operationalSummary() {
     cumpleanos: 0,
     totalClientes: clients || 0,
     rendicionesPendientes: pendingExpenses || 0,
-    entregadosHoy: deliveredResult.data?.length || 0,
-    importeEntregadoHoy: (deliveredResult.data || []).reduce((sum, order) => sum + Number(order.total || 0), 0),
+    entregadosHoy: deliveredTodayIds.size,
+    importeEntregadoHoy: salesToday,
     valorTotalInventario: (products || []).reduce((sum, product) => sum + (stockMap.get(product.id) || 0) * Number(product.costo_actual), 0),
     ventasMes: salesMonth,
     ventasHoy: salesToday,
@@ -180,7 +180,7 @@ export async function operationalSummary() {
     metaMensual: Number(budgetResult.data?.objetivo_ventas || 0),
     comprasMes: purchasesMonth,
     gastosMes: expensesMonth,
-    resultadoMes: salesMonth - purchasesMonth - expensesMonth,
+    resultadoMes: salesMonth - expensesMonth,
     compraUrgenteProductos: urgentProducts,
     compraUrgentePedidos: orders.filter(row => row.estado_operativo === "POR_COMPRAR" && String(row.fecha).slice(0, 10) <= limaDay).length,
     cobranzaUrgentePedidos: urgentReceivables.length,
