@@ -138,7 +138,7 @@ export async function processNativeCollection(token: string, payload: Collection
   const items = (details || []).map(detail => { const requested = number(detail.cantidad_unidades_base), presentationQuantity = number(detail.cantidad_presentacion), source = delivered?.find(item => productIds.get(String(item.codigo || "")) === detail.producto_id), factor = presentationQuantity > 0 ? requested / presentationQuantity : 1; return { producto_id: detail.producto_id, cantidad_pedida: requested, cantidad_entregada: source ? number(source.cantidadEntregada) * factor : requested }; });
   const medios = [["EFECTIVO", payload.efectivo], ["YAPE", payload.yape], ["PLIN", payload.plin], ["TRANSFERENCIA", payload.transferencia], ["OTRO", number(payload.pos) + number(payload.otros)]].map(([medio, monto]) => ({ medio, monto: number(monto) })).filter(item => item.monto > 0);
   const requestId = String(payload.solicitudId || crypto.randomUUID());
-  const { error } = await getSupabaseServerClient(token).rpc("procesar_entrega_cobro", { p_pedido_id: order.id, p_entrega: { estado: deliveryState(payload.estadoEntrega), fecha_entrega: payload.fechaEntrega || new Date().toISOString(), observacion: String(payload.observacion || ""), jornada_id: String(payload.jornadaId || ""), idempotency_key: `${requestId}:ENTREGA`, items }, p_pago: { medios }, p_idempotency_key: requestId });
+  const { error } = await getSupabaseServerClient(token).rpc("procesar_entrega_cobro", { p_pedido_id: order.id, p_entrega: { estado: deliveryState(payload.estadoEntrega), fecha_entrega: payload.fechaEntrega || new Date().toISOString(), fecha_promesa: String(payload.fechaPromesa || ""), fecha_reprogramada: String(payload.fechaPromesa || ""), observacion: String(payload.observacion || ""), jornada_id: String(payload.jornadaId || ""), idempotency_key: `${requestId}:ENTREGA`, items }, p_pago: { medios }, p_idempotency_key: requestId });
   if (error) throw error; return "Entrega y cobranza registradas correctamente.";
 }
 
@@ -258,8 +258,10 @@ export async function correctNativeOrder(token:string,payload:EntityPayload){con
 export async function getNativeCollections(filters: Record<string, unknown> = {}) {
   const admin = getSupabaseAdminClient();
   let query = admin.from("pedidos").select("*").order("fecha", { ascending: false });
-  if (filters.fechaDesde) query = query.gte("fecha", `${filters.fechaDesde}T00:00:00-05:00`);
-  if (filters.fechaHasta) query = query.lte("fecha", `${filters.fechaHasta}T23:59:59-05:00`);
+  const from = String(filters.fechaDesde || filters.desde || "").slice(0, 10);
+  const to = String(filters.fechaHasta || filters.hasta || "").slice(0, 10);
+  if (from) query = query.gte("fecha", `${from}T00:00:00-05:00`);
+  if (to) query = query.lte("fecha", `${to}T23:59:59-05:00`);
   const { data: orders, error } = await query; if (error) throw error;
   const orderIds = (orders || []).map(row => row.id), clientIds = [...new Set((orders || []).map(row => row.cliente_id))];
   const [{ data: clients }, { data: details }, { data: products }, { data: payments }, { data: deliveries }] = await Promise.all([
@@ -286,6 +288,55 @@ export async function closeNativeOperationalPeriod(userId: string) {
   const { data, error } = await getSupabaseAdminClient().rpc("cerrar_periodo_operativo", { p_usuario: userId });
   if (error) throw error;
   return data;
+}
+
+export async function getNativeFinanceSnapshot(periodValue: unknown) {
+  const { year, month, period } = periodParts(periodValue);
+  const lastDay = new Date(year, month, 0).getDate();
+  const from = `${period}-01`, to = `${period}-${String(lastDay).padStart(2, "0")}`;
+  const admin = getSupabaseAdminClient();
+  const [{ data: deliveries, error: deliveryError }, { data: payments, error: paymentError }, { data: expenses, error: expenseError }] = await Promise.all([
+    admin.from("entregas").select("pedido_id,fecha_entrega,estado").gte("fecha_entrega", `${from}T00:00:00-05:00`).lte("fecha_entrega", `${to}T23:59:59-05:00`).in("estado", ["ENTREGA_COMPLETA", "ENTREGADO"]),
+    admin.from("pagos").select("pedido_id,fecha,monto").gte("fecha", `${from}T00:00:00-05:00`).lte("fecha", `${to}T23:59:59-05:00`).eq("estado", "APLICADO"),
+    admin.from("gastos").select("fecha,monto,categoria").gte("fecha", from).lte("fecha", to).eq("estado", "APROBADO"),
+  ]);
+  if (deliveryError) throw deliveryError;
+  if (paymentError) throw paymentError;
+  if (expenseError) throw expenseError;
+  const deliveredIds = [...new Set((deliveries || []).map(row => row.pedido_id))];
+  const { data: orders, error: orderError } = deliveredIds.length
+    ? await admin.from("pedidos").select("id,total").in("id", deliveredIds).neq("estado_operativo", "ANULADO")
+    : { data: [], error: null };
+  if (orderError) throw orderError;
+  const totals = new Map((orders || []).map(row => [row.id, number(row.total)]));
+  const salesByDay: Record<number, number> = {}, collectionsByDay: Record<number, number> = {}, expensesByDay: Record<number, number> = {};
+  for (const delivery of deliveries || []) {
+    const day = Number(String(delivery.fecha_entrega).slice(8, 10));
+    salesByDay[day] = (salesByDay[day] || 0) + (totals.get(delivery.pedido_id) || 0);
+  }
+  for (const payment of payments || []) {
+    const day = Number(String(payment.fecha).slice(8, 10));
+    collectionsByDay[day] = (collectionsByDay[day] || 0) + number(payment.monto);
+  }
+  for (const expense of expenses || []) {
+    const day = Number(String(expense.fecha).slice(8, 10));
+    expensesByDay[day] = (expensesByDay[day] || 0) + number(expense.monto);
+  }
+  const paidAll = await admin.from("pagos").select("pedido_id,monto").eq("estado", "APLICADO").in("pedido_id", deliveredIds.length ? deliveredIds : [crypto.randomUUID()]);
+  if (paidAll.error) throw paidAll.error;
+  const paidMap = new Map<string, number>();
+  for (const payment of paidAll.data || []) paidMap.set(payment.pedido_id, (paidMap.get(payment.pedido_id) || 0) + number(payment.monto));
+  const receivable = (orders || []).reduce((sum, order) => sum + Math.max(0, number(order.total) - (paidMap.get(order.id) || 0)), 0);
+  return {
+    periodo: period,
+    ventas: Object.values(salesByDay).reduce((sum, value) => sum + value, 0),
+    cobrado: Object.values(collectionsByDay).reduce((sum, value) => sum + value, 0),
+    gastos: Object.values(expensesByDay).reduce((sum, value) => sum + value, 0),
+    porCobrar: receivable,
+    ventasPorDia: salesByDay,
+    cobrosPorDia: collectionsByDay,
+    gastosPorDia: expensesByDay,
+  };
 }
 export async function registerNativeExpense(userId: string, payload: ExpensePayload) {
   const idempotency = String(payload.solicitudId || crypto.randomUUID());

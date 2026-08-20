@@ -128,6 +128,16 @@ type Summary = {
     diferenciaCajaMonto?: number;
     periodo?: { periodo: string; estado: string; cierreAnterior: null | { periodo: string; fecha: string; usuario: string } };
 };
+type FinanceSnapshot = {
+    periodo: string;
+    ventas: number;
+    cobrado: number;
+    gastos: number;
+    porCobrar: number;
+    ventasPorDia: Record<number, number>;
+    cobrosPorDia: Record<number, number>;
+    gastosPorDia: Record<number, number>;
+};
 type ApiRecord = { [key: string]: never };
 type BulkStockRow = { filaExcel: number; codigo: string; presentacion: string; cantidad: number; nuevoCosto: number | null; observacion: string };
 type BulkStockPreview = { filaExcel: number; codigo: string; producto: string; presentacion: string; factor: number; cantidad: number; stockActual: number; stockNuevo: number; costoActual: number; nuevoCosto: number | null };
@@ -252,7 +262,7 @@ const collectionRendition = (rows: Order[]) => {
         validacion: null,
     };
 };
-const READ_ONLY = new Set(["obtenerSesion", "obtenerResumen", "obtenerCatalogoProductos", "obtenerClientes", "obtenerClientesPreventa", "obtenerStock", "obtenerEmisiones", "obtenerCobranzaPedidos", "obtenerGastosOperacion", "obtenerRendicionDia", "obtenerMovimientosIngreso", "obtenerHistorial", "obtenerCentroGerencial", "obtenerPlaneamientoMensual", "obtenerContabilidadDiaria", "obtenerCurvaS", "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "obtenerListas", "obtenerPreparacionPedido", "obtenerActividadReciente"]);
+const READ_ONLY = new Set(["obtenerSesion", "obtenerResumen", "obtenerCatalogoProductos", "obtenerClientes", "obtenerClientesPreventa", "obtenerStock", "obtenerEmisiones", "obtenerCobranzaPedidos", "obtenerGastosOperacion", "obtenerRendicionDia", "obtenerMovimientosIngreso", "obtenerHistorial", "obtenerCentroGerencial", "obtenerResumenFinanciero", "obtenerPlaneamientoMensual", "obtenerContabilidadDiaria", "obtenerCurvaS", "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "obtenerListas", "obtenerPreparacionPedido", "obtenerActividadReciente"]);
 const OFFLINE_MUTATIONS = new Set(["registrarVenta", "registrarCliente", "actualizarCliente", "registrarProducto", "actualizarProducto", "guardarPreparacionPedido", "asignarPedidoJornada", "guardarCobranzaPedido", "registrarGastoOperacion", "cerrarJornada", "registrarMovimiento", "registrarMovimientosMasivos"]);
 function offlineArgs(args: unknown[]) {
     if (!args.length || typeof args[0] !== "object" || args[0] === null || Array.isArray(args[0])) return args;
@@ -966,7 +976,7 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     const [assignmentBusy, setAssignmentBusy] = useState(false);
     const [deliveryOpen, setDeliveryOpen] = useState(false);
     const [deliveryBusy, setDeliveryBusy] = useState(false);
-    const [delivery, setDelivery] = useState({ resultado: "ENTREGADO", fechaEntrega: today(), medioPago: "CREDITO", monto: 0, observacion: "", fechaPromesa: "" });
+    const [delivery, setDelivery] = useState({ resultado: "ENTREGADO", pagoRealizado: true, fechaEntrega: today(), medioPago: "EFECTIVO", monto: 0, observacion: "", fechaPromesa: "" });
     const [editClient, setEditClient] = useState("");
     const [editObs, setEditObs] = useState("");
     const [editItems, setEditItems] = useState<Array<{ codigo: string; nombre: string; cantidad: number; precioUnitario: number }>>([]);
@@ -1062,18 +1072,19 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     function openDelivery(result = "ENTREGADO") {
         if (!detail) return;
         const balance = Math.max(0, Number(detail.saldo ?? detail.total) || 0);
-        setDelivery({ resultado: result, fechaEntrega: today(), medioPago: result === "ENTREGADO" ? "EFECTIVO" : "SIN_COBRO", monto: result === "ENTREGADO" ? balance : 0, observacion: "", fechaPromesa: result === "ENTREGADO_SIN_PAGO" || result === "REPROGRAMADO" ? addDays(today(), 3) : "" });
+        const paid = result === "ENTREGADO";
+        setDelivery({ resultado: paid ? "ENTREGADO" : "ENTREGADO_SIN_PAGO", pagoRealizado: paid, fechaEntrega: today(), medioPago: paid ? "EFECTIVO" : "SIN_COBRO", monto: paid ? balance : 0, observacion: "", fechaPromesa: paid ? "" : addDays(today(), 2) });
         setDeliveryOpen(true);
     }
     async function submitDelivery(e: FormEvent) {
         e.preventDefault();
         if (!detail || deliveryBusy) return;
         const balance = Math.max(0, Number(detail.saldo ?? detail.total) || 0);
-        const amount = delivery.medioPago === "CREDITO" || delivery.resultado !== "ENTREGADO" ? 0 : Math.min(balance, Math.max(0, Number(delivery.monto) || 0));
+        const amount = !delivery.pagoRealizado || delivery.resultado !== "ENTREGADO" ? 0 : Math.min(balance, Math.max(0, Number(delivery.monto) || 0));
         const isDelivered = delivery.resultado === "ENTREGADO" || delivery.resultado === "ENTREGADO_SIN_PAGO";
-        if (["ENTREGADO_SIN_PAGO", "RECHAZADO", "REPROGRAMADO"].includes(delivery.resultado) && !delivery.observacion.trim()) return notify("Indica el motivo de la incidencia.");
-        if (["ENTREGADO_SIN_PAGO", "REPROGRAMADO"].includes(delivery.resultado) && !delivery.fechaPromesa) return notify(delivery.resultado === "REPROGRAMADO" ? "Indica la nueva fecha de entrega." : "Indica la fecha de compromiso de pago.");
-        if (delivery.resultado === "ENTREGADO" && delivery.medioPago !== "CREDITO" && amount <= 0) return notify("Indica el importe cobrado.");
+        if (!delivery.pagoRealizado && !delivery.observacion.trim()) return notify("Indica el motivo de la observación.");
+        if (!delivery.pagoRealizado && !delivery.fechaPromesa) return notify("Indica la fecha de seguimiento.");
+        if (delivery.pagoRealizado && amount <= 0) return notify("Indica el importe cobrado.");
         setDeliveryBusy(true);
         try {
             const efectivo = delivery.medioPago === "EFECTIVO" ? amount : 0;
@@ -1081,7 +1092,7 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
             const plin = delivery.medioPago === "PLIN" ? amount : 0;
             const transferencia = delivery.medioPago === "TRANSFERENCIA" ? amount : 0;
             const totalPaid = Number(detail.totalCobrado || 0) + amount;
-            const message = await call<string>("guardarCobranzaPedido", [{ ...detail, solicitudId: crypto.randomUUID(), ventaId: detail.ventaId, cliente: detail.cliente, totalPedido: detail.total, estadoEntrega: delivery.resultado, subestadoOperativo: delivery.resultado, fechaEntrega: delivery.fechaEntrega, estadoPago: totalPaid >= detail.total - .01 ? "TOTAL" : totalPaid > .01 ? "PARCIAL" : "PENDIENTE", efectivo: Number(detail.efectivo || 0) + efectivo, yape: Number(detail.yape || 0) + yape, plin: Number(detail.plin || 0) + plin, transferencia: Number(detail.transferencia || 0) + transferencia, pos: detail.pos || 0, otros: detail.otros || 0, fechaPromesa: ["ENTREGADO_SIN_PAGO", "REPROGRAMADO"].includes(delivery.resultado) || (delivery.resultado === "ENTREGADO" && totalPaid < detail.total - .01) ? delivery.fechaPromesa : "", medioPrometido: totalPaid < detail.total - .01 ? "POR CONFIRMAR" : "", observacion: delivery.observacion, itemsEntregados: detail.items.map(item => ({ codigo: item.codigo, cantidadPedida: item.cantidad, cantidadEntregada: isDelivered ? item.cantidad : 0 })) }]);
+            const message = await call<string>("guardarCobranzaPedido", [{ ...detail, solicitudId: crypto.randomUUID(), ventaId: detail.ventaId, cliente: detail.cliente, totalPedido: detail.total, estadoEntrega: delivery.resultado, subestadoOperativo: delivery.resultado, fechaEntrega: delivery.fechaEntrega, estadoPago: totalPaid >= detail.total - .01 ? "TOTAL" : totalPaid > .01 ? "PARCIAL" : "PENDIENTE", efectivo: Number(detail.efectivo || 0) + efectivo, yape: Number(detail.yape || 0) + yape, plin: Number(detail.plin || 0) + plin, transferencia: Number(detail.transferencia || 0) + transferencia, pos: detail.pos || 0, otros: detail.otros || 0, fechaPromesa: !delivery.pagoRealizado ? delivery.fechaPromesa : "", medioPrometido: totalPaid < detail.total - .01 ? "POR CONFIRMAR" : "", observacion: delivery.observacion, itemsEntregados: detail.items.map(item => ({ codigo: item.codigo, cantidadPedida: item.cantidad, cantidadEntregada: isDelivered ? item.cantidad : 0 })) }]);
             notify(message || "Operación registrada correctamente.");
             setDeliveryOpen(false);
             setDetail(null);
@@ -1184,7 +1195,15 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
         {visible.length > 15 && <button className="show-all-orders" onClick={() => { setAllOrdersPage(1); setShowAllOrders(true); }}>VER MÁS · {visible.length} PEDIDOS</button>}
         {showAllOrders && <div className="modal-bg all-orders-bg" onMouseDown={event => { if(event.target === event.currentTarget) setShowAllOrders(false); }}><section className="all-orders-modal" role="dialog" aria-modal="true"><header><div><small>PEDIDOS FILTRADOS</small><h2>{orderTab.replace(/_/g," ")}</h2><p>{visible.length} resultados · {range.from} al {range.to}</p></div><button onClick={() => setShowAllOrders(false)}>×</button></header><div className="all-orders-list">{pagedVisible.map(order => <button key={order.ventaId} onClick={() => { setShowAllOrders(false); openDetail(order); }}><span><b>{order.ventaId}</b><small>{order.cliente} · {order.telefono || "Sin teléfono"}</small></span><span><small>{order.fecha}</small><strong>{money(order.total)}</strong></span><em>{stateOf(order).replace(/_/g," ")}</em></button>)}</div><footer><button disabled={allOrdersPage <= 1} onClick={() => setAllOrdersPage(page => Math.max(1,page-1))}>Anterior</button><span>Página {allOrdersPage} de {allPageCount}</span><button disabled={allOrdersPage >= allPageCount} onClick={() => setAllOrdersPage(page => Math.min(allPageCount,page+1))}>Siguiente</button></footer></section></div>}
         {detail && <div className="modal-bg order-dialog-bg" onMouseDown={e => { if(e.target===e.currentTarget) closeDetail(); }}><section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" className="order-detail order-dialog flow-order-detail"><div className="order-dialog-body"><button className="close" onClick={closeDetail}>×</button><small className="eyebrow">PEDIDO</small><h2>{detail.ventaId}</h2><p>{detail.cliente} · {detail.telefono || "Sin teléfono"}</p><div className={`emission-summary ${detail.codigoImpresion ? "emitted" : ""}`}><b>{detail.codigoImpresion ? "✓ Boleta emitida" : "Boleta no emitida"}</b>{detail.codigoImpresion && <small>{detail.codigoImpresion}</small>}</div><div className="order-progress"><span className="done">Pedido creado ✓</span><span className={stateOf(detail)!=="POR_COMPRAR" ? "done" : ""}>Preparación</span><span className={["LISTO_PARA_ENTREGA","EN_RUTA","ENTREGADO"].includes(stateOf(detail)) ? "done" : ""}>Listo</span><span className={stateOf(detail)==="EN_RUTA" || stateOf(detail)==="ENTREGADO" ? "done" : ""}>En ruta</span><span className={stateOf(detail)==="ENTREGADO" ? "done" : ""}>Entregado</span><span className={Number(detail.saldo ?? detail.total)<=.01 ? "done" : ""}>Cobrado</span></div><section className="preparation-control"><header><h3>Preparación del pedido</h3><small>{stateOf(detail)==="POR_COMPRAR" ? autoSaveState : "Solo lectura"}</small></header>{preparation.map((line,index) => { const requested=Number(line.cantidadPedido); return <article key={line.codigo}><span><b>{line.producto}</b><small>{line.codigo} · {line.presentacion || "Unidad"} x{line.factorPresentacion || 1}</small></span><label>Preparado<input disabled={stateOf(detail)!=="POR_COMPRAR"} type="number" min="0" max={requested} step=".01" value={line.cantidadPreparada || ""} onChange={e => updatePreparation(index,Number(e.target.value))}/></label><span className="picking-requested"><small>SOLICITADO</small><b>{requested} {line.presentacion || "Unidad"}</b></span><span className="picking-price"><small>PRECIO</small><b>{money(line.precio)}</b></span><strong className={`picking-${line.estadoLinea.toLowerCase()}`}>{line.estadoLinea === "PREPARADO" ? "✓ PREPARADO" : "⚠ PENDIENTE"}</strong></article>})}{stateOf(detail)==="POR_COMPRAR" && (allPrepared ? <p className="all-prepared">✓ TODOS LOS MATERIALES PREPARADOS</p> : <p className="preparation-warning">Faltan materiales por preparar.</p>)}<div className="preparation-total"><span>TOTAL</span><b>{money(detail.total)}</b></div></section></div><footer className={`order-sticky-actions state-${stateOf(detail).toLowerCase()}`}><small>ACCIONES DEL PEDIDO</small><div>{stateOf(detail)==="POR_COMPRAR" && <><button className="action-print" disabled={printing} onClick={() => printOrder(detail)}>{printing ? printStage : detail.codigoImpresion ? "REIMPRIMIR" : "EMITIR"}</button><button className="action-edit" onClick={() => startEdit(detail)}>EDITAR PEDIDO</button><button className="primary" disabled={savingPreparation || !allPrepared} onClick={() => savePreparation(true)}>LISTO PARA ENTREGA</button></>}{stateOf(detail)==="LISTO_PARA_ENTREGA" && <><button className="action-print" disabled={printing} onClick={() => printOrder(detail)}>{printing ? printStage : "IMPRIMIR"}</button><button className="action-edit" onClick={() => startEdit(detail)}>EDITAR PEDIDO</button><button className="primary" disabled={assignmentBusy} onClick={markInRoute}>{assignmentBusy ? "CAMBIANDO…" : "MARCAR EN RUTA"}</button></>}{stateOf(detail)==="EN_RUTA" && <><button className="action-edit" onClick={() => startEdit(detail)}>EDITAR PEDIDO</button><button className="primary" onClick={() => openDelivery("ENTREGADO")}>ENTREGADO</button><button className="action-observed" onClick={() => openDelivery("ENTREGADO_SIN_PAGO")}>OBSERVADO</button></>}{stateOf(detail)==="ENTREGADO" && <><span className="delivered-label">✓ PEDIDO ENTREGADO</span>{Number(detail.saldo ?? detail.total)>.01 && <button className="primary" onClick={() => openDelivery("ENTREGADO")}>REGISTRAR COBRO</button>}<button className="action-print" disabled={printing} onClick={() => printOrder(detail)}>IMPRIMIR</button></>}</div></footer></section></div>}
-        {deliveryOpen && detail && <div className="modal-bg delivery-action-bg"><form className="modal delivery-action-modal" onSubmit={submitDelivery}><button type="button" className="close" onClick={() => setDeliveryOpen(false)}>×</button><small className="eyebrow">{delivery.resultado === "ENTREGADO" ? "ENTREGA Y COBRO" : "PEDIDO OBSERVADO"}</small><h2>{detail.ventaId}</h2>{delivery.resultado !== "ENTREGADO" && <label>Incidencia<select value={delivery.resultado} onChange={e => setDelivery({...delivery,resultado:e.target.value,fechaPromesa:["ENTREGADO_SIN_PAGO","REPROGRAMADO"].includes(e.target.value) ? delivery.fechaPromesa || addDays(today(),3) : ""})}><option value="ENTREGADO_SIN_PAGO">Entregado sin pago</option><option value="RECHAZADO">Rechazado</option><option value="REPROGRAMADO">Reprogramado</option></select></label>}<label>Fecha<input type="date" required value={delivery.fechaEntrega} onChange={e => setDelivery({...delivery,fechaEntrega:e.target.value})}/></label>{delivery.resultado === "ENTREGADO" && <><label>Medio de pago<select value={delivery.medioPago} onChange={e => setDelivery({...delivery,medioPago:e.target.value,monto:Math.max(0,Number(detail.saldo ?? detail.total))})}><option value="EFECTIVO">Efectivo</option><option value="YAPE">Yape</option><option value="PLIN">Plin</option><option value="TRANSFERENCIA">Transferencia</option></select></label><label>Importe cobrado<input type="number" min="0.01" max={Math.max(0,Number(detail.saldo ?? detail.total))} step="0.01" value={delivery.monto || ""} onChange={e => setDelivery({...delivery,monto:Number(e.target.value)})}/></label></>}{["ENTREGADO_SIN_PAGO","REPROGRAMADO"].includes(delivery.resultado) && <label>{delivery.resultado === "REPROGRAMADO" ? "Nueva fecha de entrega" : "Compromiso de pago"}<input type="date" required value={delivery.fechaPromesa} onChange={e => setDelivery({...delivery,fechaPromesa:e.target.value})}/></label>}<label>Comentario<textarea required={delivery.resultado !== "ENTREGADO"} value={delivery.observacion} onChange={e => setDelivery({...delivery,observacion:e.target.value})} placeholder="Motivo, referencia o indicación"/></label><button className="primary" disabled={deliveryBusy}>{deliveryBusy ? "REGISTRANDO…" : delivery.resultado === "ENTREGADO" ? "CONFIRMAR ENTREGA" : "REGISTRAR OBSERVACIÓN"}</button></form></div>}
+        {deliveryOpen && detail && <div className="modal-bg delivery-action-bg"><form className="modal delivery-action-modal delivery-decision-modal" onSubmit={submitDelivery}>
+            <button type="button" className="close" onClick={() => setDeliveryOpen(false)}>×</button>
+            <small className="eyebrow">ENTREGA Y COBRANZA</small><h2>{detail.ventaId}</h2>
+            <label>Fecha de entrega<input type="date" required value={delivery.fechaEntrega} onChange={e => setDelivery({...delivery,fechaEntrega:e.target.value,fechaPromesa:delivery.pagoRealizado ? "" : addDays(e.target.value,2)})}/></label>
+            <fieldset className="delivery-payment-choice"><legend>¿El cliente realizó el pago?</legend><div><label><input type="radio" name="pagoRealizado" checked={delivery.pagoRealizado} onChange={() => setDelivery({...delivery,pagoRealizado:true,resultado:"ENTREGADO",medioPago:"EFECTIVO",monto:Math.max(0,Number(detail.saldo ?? detail.total)),fechaPromesa:""})}/> Sí, pagó</label><label><input type="radio" name="pagoRealizado" checked={!delivery.pagoRealizado} onChange={() => setDelivery({...delivery,pagoRealizado:false,resultado:"ENTREGADO_SIN_PAGO",medioPago:"SIN_COBRO",monto:0,fechaPromesa:addDays(delivery.fechaEntrega || today(),2)})}/> No pagó / hubo incidencia</label></div></fieldset>
+            {delivery.pagoRealizado ? <><label>Medio de pago<select value={delivery.medioPago} onChange={e => setDelivery({...delivery,medioPago:e.target.value,monto:Math.max(0,Number(detail.saldo ?? detail.total))})}><option value="EFECTIVO">Efectivo</option><option value="YAPE">Yape</option></select></label><label>Importe cobrado<input type="number" min="0.01" max={Math.max(0,Number(detail.saldo ?? detail.total))} step="0.01" value={delivery.monto || ""} onChange={e => setDelivery({...delivery,monto:Number(e.target.value)})}/></label></> : <><label>Resultado<select value={delivery.resultado} onChange={e => setDelivery({...delivery,resultado:e.target.value})}><option value="ENTREGADO_SIN_PAGO">Entregado, faltó el pago</option><option value="CLIENTE_AUSENTE">No entregado</option><option value="RECHAZADO">Rechazado</option></select></label><label>Fecha de seguimiento<input type="date" required value={delivery.fechaPromesa} onChange={e => setDelivery({...delivery,fechaPromesa:e.target.value})}/><small>Se propone automáticamente dos días después de la entrega.</small></label></>}
+            <label>Comentario<textarea required={!delivery.pagoRealizado} value={delivery.observacion} onChange={e => setDelivery({...delivery,observacion:e.target.value})} placeholder={delivery.pagoRealizado ? "Referencia o indicación (opcional)" : "Motivo obligatorio de la observación"}/></label>
+            <button className="primary" disabled={deliveryBusy}>{deliveryBusy ? "REGISTRANDO…" : delivery.pagoRealizado ? "CONFIRMAR ENTREGA Y PAGO" : "REGISTRAR EN OBSERVADOS"}</button>
+        </form></div>}
         {editing && detail && <div className="modal-bg"><section className="modal order-editor"><button type="button" className="close" onClick={() => setEditing(false)}>×</button><small className="eyebrow">EDITAR PEDIDO</small><h2>{detail.ventaId}</h2><label>Cliente<input value={editClient} onChange={e => setEditClient(e.target.value)}/></label><label>Observaciones<textarea value={editObs} onChange={e => setEditObs(e.target.value)}/></label><h3>Productos y cantidades</h3>{editItems.map((item,index) => <div className="order-edit-item" key={item.codigo}><span><b>{item.nombre}</b><small>{item.codigo} · {money(item.precioUnitario)}</small></span><input aria-label={`Cantidad de ${item.nombre}`} type="number" min="0.01" step="0.01" value={item.cantidad} onChange={e => setEditItems(rows => rows.map((row,current) => current === index ? {...row,cantidad:Number(e.target.value)} : row))}/><button type="button" onClick={() => setEditItems(rows => rows.filter((_,current) => current !== index))}>×</button></div>)}<div className="detail-total"><span>Nuevo total</span><strong>{money(editItems.reduce((sum,item) => sum + item.cantidad * item.precioUnitario,0))}</strong></div><button className="primary" disabled={savingEdit} onClick={saveEdit}>{savingEdit ? "GUARDANDO…" : "GUARDAR CAMBIOS"}</button></section></div>}
     </div>;
 }
@@ -1525,6 +1544,7 @@ function Finance({ call, notify }: {
     const [rendition, setRendition] = useState<RenditionData | null>(null);
     const [approvals, setApprovals] = useState<ExpenseApproval[]>([]);
     const [financeOrders, setFinanceOrders] = useState<Order[]>([]);
+    const [snapshot, setSnapshot] = useState<FinanceSnapshot | null>(null);
     const [resolvingExpense, setResolvingExpense] = useState("");
     const [goalOpen, setGoalOpen] = useState(false);
     const [receptionOpen, setReceptionOpen] = useState(false);
@@ -1545,10 +1565,11 @@ function Finance({ call, notify }: {
         if (cachedCollections.length)
             setRendition(collectionRendition(cachedCollections));
         try {
-            const [pResult, aResult, cResult] = await Promise.allSettled([
+            const [pResult, aResult, cResult, snapshotResult] = await Promise.allSettled([
                 call<PlanData>("obtenerPlaneamientoMensual", [period]),
                 call<AccountingData>("obtenerContabilidadDiaria", [period]),
                 call<CurveData>("obtenerCurvaS", [indicator, view, `${period}-01`, true]),
+                call<FinanceSnapshot>("obtenerResumenFinanciero", [period]),
             ]);
             const p = pResult.status === "fulfilled" ? pResult.value : cached?.plan;
             const a = aResult.status === "fulfilled" ? aResult.value : cached?.accounting;
@@ -1556,6 +1577,7 @@ function Finance({ call, notify }: {
             setPlan(p || null);
             setAccounting(a || null);
             setCurve(c || null);
+            if (snapshotResult.status === "fulfilled") setSnapshot(snapshotResult.value);
             const snapshot = { plan: p, accounting: a, curve: c, rendition: cacheGet<RenditionData | null>("nexo_finance_rendition", null) };
             cacheSet(cacheKey, snapshot);
             cacheSet("nexo_finance_latest", snapshot);
@@ -1722,20 +1744,18 @@ function Finance({ call, notify }: {
     const rows = accounting?.filas || [];
     const dayIncluded = (day: number) => periodScope === "MES" || (periodScope === "PRIMERO" ? day <= 15 : day >= 16);
     const sumByType = (type: string) => rows.filter((row: FinanceRow) => row.tipo === type).reduce((sum: number, row: FinanceRow) => sum + Object.entries(row.valores || {}).filter(([day]) => dayIncluded(Number(day))).reduce((subtotal: number, [, value]) => subtotal + Number(value || 0), 0), 0);
-    const realExpenses = sumByType("OPERACIÓN GASTO");
-    const cumulativeSales = curve?.real || [];
-    const fullRevenue = Number(cumulativeSales.at(-1) ?? cs.real ?? 0);
-    const firstRevenue = Number(cumulativeSales[Math.min(14, cumulativeSales.length - 1)] || 0);
-    const actualRevenue = periodScope === "PRIMERO" ? firstRevenue : periodScope === "SEGUNDO" ? Math.max(0, fullRevenue - firstRevenue) : fullRevenue;
+    const scopedSnapshot = (values: Record<number, number> | undefined) => Object.entries(values || {}).filter(([day]) => dayIncluded(Number(day))).reduce((sum, [, value]) => sum + Number(value || 0), 0);
+    const realExpenses = snapshot ? scopedSnapshot(snapshot.gastosPorDia) : sumByType("OPERACIÓN GASTO");
+    const actualRevenue = snapshot ? scopedSnapshot(snapshot.ventasPorDia) : 0;
     const monthlyTarget = (plan?.filas || []).filter((row: FinanceRow) => String(row.tipo || "").includes("INGRESO") || String(row.categoria || "").toUpperCase() === "VENTAS").reduce((sum: number, row: FinanceRow) => sum + Number(row.monto || 0), 0) || Number(cs.planeado || rs.ingresos || 0);
     const expenseBudget = (plan?.filas || []).filter((row: FinanceRow) => String(row.tipo || "").includes("GASTO")).reduce((sum: number, row: FinanceRow) => sum + Number(row.monto || 0), 0) || Number(rs.gastos || 0);
     const selectedDate = new Date(`${period}-01T12:00:00`);
     const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
     const targetRevenue = periodScope === "PRIMERO" ? monthlyTarget * 15 / daysInMonth : periodScope === "SEGUNDO" ? monthlyTarget * (daysInMonth - 15) / daysInMonth : monthlyTarget;
     const result = actualRevenue - realExpenses;
-    const periodOrders = financeOrders.filter(order => { const day = Number(String(order.fecha).match(/^(\d{1,2})\//)?.[1] || String(order.fecha).slice(8, 10)); return dayIncluded(day); });
-    const collected = periodOrders.reduce((sum, order) => sum + Number(order.totalCobrado || 0), 0);
-    const receivable = periodOrders.reduce((sum, order) => sum + Number(order.saldo || 0), 0);
+    const periodOrders = financeOrders.filter(order => { const source = order.fechaEntrega || order.fecha; const day = Number(String(source).match(/^(\d{1,2})\//)?.[1] || String(source).slice(8, 10)); return dayIncluded(day); });
+    const collected = snapshot ? scopedSnapshot(snapshot.cobrosPorDia) : periodOrders.reduce((sum, order) => sum + Number(order.totalCobrado || 0), 0);
+    const receivable = snapshot?.porCobrar ?? periodOrders.filter(order => String(order.estadoEntrega || "").toUpperCase().includes("ENTREG")).reduce((sum, order) => sum + Number(order.saldo || 0), 0);
     const budgetComparison = (plan?.filas || []).filter(row => String(row.tipo || "").includes("GASTO") && String(row.categoria || "").toUpperCase() !== "PRESUPUESTO").map(row => {
         const real = rows.filter(actualRow => String(actualRow.categoria || "").toUpperCase() === String(row.categoria || "").toUpperCase() || String(actualRow.concepto || "").toUpperCase() === String(row.concepto || "").toUpperCase()).reduce((sum, actualRow) => sum + Object.entries(actualRow.valores || {}).filter(([day]) => dayIncluded(Number(day))).reduce((subtotal, [, value]) => subtotal + Number(value || 0), 0), 0);
         return { ...row, real, difference: Number(row.monto || 0) - real, progress: Number(row.monto || 0) ? real / Number(row.monto || 0) * 100 : 0 };
@@ -1748,7 +1768,7 @@ function Finance({ call, notify }: {
     const dailyNeed = remaining / Math.max(1, daysInMonth - elapsedDays);
     const progress = targetRevenue ? actualRevenue / targetRevenue * 100 : 0;
     const expenseProgress = expenseBudget ? realExpenses / expenseBudget * 100 : 0;
-    const labels = curve?.labels || [], plannedValues = curve?.planeado || [], actualValues = curve?.real || [];
+    const labels = curve?.labels || [], plannedValues = curve?.planeado || [], actualValues = labels.map((_, index) => Array.from({ length: index + 1 }, (__, day) => Number(snapshot?.ventasPorDia?.[day + 1] || 0)).reduce((sum, value) => sum + value, 0));
     const chartMax = Math.max(1, ...plannedValues, ...actualValues);
     const chartPoints = (values: number[]) => values.map((value, index) => `${labels.length <= 1 ? 300 : 20 + index * (560 / (labels.length - 1))},${195 - Number(value || 0) / chartMax * 155}`).join(" ");
     const status = !targetRevenue ? { tone: "warning", title: "Falta definir una meta comercial", text: "Registra el presupuesto de ventas para medir avance y proyección." } : progress >= 100 ? { tone: "good", title: "Meta comercial alcanzada", text: `Superaste la meta en ${money(actualRevenue - targetRevenue)}.` } : projection >= targetRevenue ? { tone: "good", title: "Ritmo suficiente para cumplir", text: `La proyección al cierre es ${money(projection)}.` } : { tone: "danger", title: "Riesgo de no alcanzar la meta", text: `Necesitas vender aproximadamente ${money(dailyNeed)} por día restante.` };
@@ -1762,17 +1782,42 @@ function Reports({ call, notify }: {
     const [to, setTo] = useState(today());
     const [query, setQuery] = useState("");
     const [rows, setRows] = useState<Order[]>([]);
+    const [stateFilter, setStateFilter] = useState("TODOS");
+    const [clientFilter, setClientFilter] = useState("TODOS");
+    const [sort, setSort] = useState<"fecha-desc" | "fecha-asc" | "total-desc" | "total-asc">("fecha-desc");
+    const [page, setPage] = useState(1);
+    const [loading, setLoading] = useState(false);
     const load = useCallback(async () => {
+        setLoading(true);
         try {
             setRows(await call<Order[]>("obtenerEmisiones", [{ fechaDesde: from, fechaHasta: to, texto: query }]));
-        }
-        catch (x) {
+        } catch (x) {
             notify(x instanceof Error ? x.message : "No se cargó");
-        }
+        } finally { setLoading(false); }
     }, [call, from, notify, query, to]);
     useEffect(() => { queueMicrotask(() => void load()); }, [load]);
-    function csv() { const lines = [["Pedido", "Fecha", "Cliente", "Total"], ...rows.map(x => [x.ventaId, x.fecha, x.cliente, x.total])].map(x => x.join(";")).join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([lines], { type: "text/csv" })); a.download = `reporte-${from}-${to}.csv`; a.click(); }
-    return <div><Heading eyebrow="INFORMACIÓN HISTÓRICA" title="Reportes" text="Cruza ventas por fechas, cliente, pedido o producto."><button className="primary" onClick={csv}>Exportar CSV</button></Heading><section className="section-tools"><input type="date" value={from} onChange={e => setFrom(e.target.value)}/><input type="date" value={to} onChange={e => setTo(e.target.value)}/><label className="search"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cliente, producto o pedido…"/></label><button onClick={load}>Filtrar</button></section><section className="panel data-panel"><SimpleOrders rows={rows}/></section></div>;
+    const stateOfReport = (order: Order) => normalizeOperationalState(order.estadoOperativo || order.estadoEntrega).replace(/_/g, " ");
+    const clients = [...new Set(rows.map(row => row.cliente).filter(Boolean))].sort();
+    const states = [...new Set(rows.map(stateOfReport))].sort();
+    const filtered = useMemo(() => rows.filter(row => (stateFilter === "TODOS" || stateOfReport(row) === stateFilter) && (clientFilter === "TODOS" || row.cliente === clientFilter)).sort((a, b) => {
+        if (sort.startsWith("total")) return (Number(a.total) - Number(b.total)) * (sort.endsWith("desc") ? -1 : 1);
+        return (new Date(a.fecha).getTime() - new Date(b.fecha).getTime()) * (sort.endsWith("desc") ? -1 : 1);
+    }), [rows, stateFilter, clientFilter, sort]);
+    const pageSize = 20, pages = Math.max(1, Math.ceil(filtered.length / pageSize)), currentPage = Math.min(page, pages);
+    const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    useEffect(() => { queueMicrotask(() => setPage(1)); }, [from, to, query, stateFilter, clientFilter, sort]);
+    const displayDate = (value: string) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Lima" }); };
+    function csv() {
+        const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+        const lines = [["Pedido", "Fecha", "Cliente", "Estado", "Productos", "Total"], ...filtered.map(row => [row.ventaId, displayDate(row.fecha), row.cliente, stateOfReport(row), row.items.map(item => `${item.codigo} ${item.nombre} x${item.cantidad}`).join(" | "), row.total])].map(line => line.map(escape).join(";")).join("\r\n");
+        const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([`\uFEFF${lines}`], { type: "text/csv;charset=utf-8" })); link.download = `Reporte_NexoVenta_${from}_${to}.csv`; link.click(); URL.revokeObjectURL(link.href);
+    }
+    async function xlsx() {
+        const XLSX = await import("xlsx");
+        const sheet = XLSX.utils.json_to_sheet(filtered.map(row => ({ Pedido: row.ventaId, Fecha: displayDate(row.fecha), Cliente: row.cliente, Estado: stateOfReport(row), Productos: row.items.map(item => `${item.codigo} · ${item.nombre} x${item.cantidad}`).join(" | "), Total: Number(row.total) })));
+        const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Pedidos"); XLSX.writeFile(book, `Reporte_NexoVenta_${from}_${to}.xlsx`);
+    }
+    return <div className="reports-page"><Heading eyebrow="INFORMACIÓN HISTÓRICA" title="Reportes" text="Consulta, ordena y exporta pedidos usando los mismos filtros visibles."><div className="report-export-actions"><button onClick={csv}>CSV</button><button className="primary" onClick={xlsx}>Excel</button></div></Heading><section className="report-filters"><label>Desde<input type="date" value={from} onChange={e => setFrom(e.target.value)}/></label><label>Hasta<input type="date" value={to} onChange={e => setTo(e.target.value)}/></label><label>Estado<select value={stateFilter} onChange={e => setStateFilter(e.target.value)}><option value="TODOS">Todos</option>{states.map(state => <option key={state}>{state}</option>)}</select></label><label>Cliente<select value={clientFilter} onChange={e => setClientFilter(e.target.value)}><option value="TODOS">Todos</option>{clients.map(client => <option key={client}>{client}</option>)}</select></label><label>Orden<select value={sort} onChange={e => setSort(e.target.value as typeof sort)}><option value="fecha-desc">Más recientes</option><option value="fecha-asc">Más antiguos</option><option value="total-desc">Mayor total</option><option value="total-asc">Menor total</option></select></label><label className="report-search">Buscar<input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void load(); }} placeholder="Pedido, cliente o producto"/></label><button className="primary" onClick={load} disabled={loading}>{loading ? "Consultando…" : "Aplicar"}</button><button onClick={() => { setStateFilter("TODOS"); setClientFilter("TODOS"); setQuery(""); }}>Limpiar</button></section><section className="report-summary"><span><b>{filtered.length}</b> resultados</span><span>Total visible <b>{money(filtered.reduce((sum, row) => sum + Number(row.total || 0), 0))}</b></span><small>{from} al {to}</small></section><section className="panel report-results"><div className="report-table table-wrap"><table><thead><tr><th>Pedido</th><th>Fecha</th><th>Cliente</th><th>Productos</th><th>Estado</th><th>Total</th></tr></thead><tbody>{visible.map(row => <tr key={row.ventaId}><td><b>{row.ventaId}</b></td><td>{displayDate(row.fecha)}</td><td>{row.cliente}</td><td><small>{row.items.slice(0, 2).map(item => item.nombre).join(", ")}{row.items.length > 2 ? ` +${row.items.length - 2}` : ""}</small></td><td><span className="report-state">{stateOfReport(row)}</span></td><td><b>{money(row.total)}</b></td></tr>)}</tbody></table></div><div className="report-cards">{visible.map(row => <article key={row.ventaId}><header><b>{row.ventaId}</b><span>{stateOfReport(row)}</span></header><h3>{row.cliente}</h3><time>{displayDate(row.fecha)}</time><p>{row.items.slice(0, 3).map(item => `${item.nombre} ×${item.cantidad}`).join(" · ")}</p><strong>{money(row.total)}</strong></article>)}</div>{!visible.length && <div className="report-empty">No hay pedidos para los filtros seleccionados.</div>}<footer className="report-pagination"><button disabled={page <= 1} onClick={() => setPage(value => value - 1)}>Anterior</button><span>Página {page} de {pages}</span><button disabled={page >= pages} onClick={() => setPage(value => value + 1)}>Siguiente</button></footer></section></div>;
 }
 function ProductCurvePicker({ index, color, value, options, onChange }: {
     index: number;

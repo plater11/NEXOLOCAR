@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
 import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, mirrorSaleMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_ORDER_MUTATIONS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
 import { createSupabaseUser, deleteSupabaseUser, listSupabaseUsers, loginSupabase, logoutSupabase, requireSupabaseSession, updateSupabaseUser, type UserPayload } from "../../../lib/supabase/auth";
-import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, closeNativeOperationalPeriod, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeBulkStockTemplate, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, getNativeStockBatches, importNativeBulkStock, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, revertNativeStockBatch, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState, validateNativeBulkStock } from "../../../lib/supabase/operations";
+import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, closeNativeOperationalPeriod, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeBulkStockTemplate, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeFinanceSnapshot, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, getNativeStockBatches, importNativeBulkStock, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, revertNativeStockBatch, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState, validateNativeBulkStock } from "../../../lib/supabase/operations";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "cerrarPeriodoOperativo", "obtenerCatalogoProductos",
@@ -14,7 +14,7 @@ const ALLOWED = new Set([
   "obtenerPreparacionPedido", "guardarPreparacionPedido", "asignarPedidoJornada", "obtenerConsolidadoCompra", "actualizarPedidosMasivo", "obtenerActividadReciente",
   "registrarGastoOperacion", "obtenerGastosOperacion", "obtenerGastosPendientes", "resolverGastoOperacion",
   "obtenerResumenJornada", "cerrarJornada", "obtenerRendicionDia", "validarRendicionDia",
-  "registrarMovimientoFinanciero", "obtenerCentroGerencial", "guardarPlaneamientoMensual", "duplicarPlaneamientoMensualAnterior",
+  "registrarMovimientoFinanciero", "obtenerCentroGerencial", "obtenerResumenFinanciero", "guardarPlaneamientoMensual", "duplicarPlaneamientoMensualAnterior",
   "obtenerPlaneamientoMensual", "guardarContabilidadDiaria", "obtenerContabilidadDiaria", "obtenerCurvaS",
   "obtenerAnalisis", "obtenerAnalisisVentasTemporal", "obtenerUsuarios", "crearUsuarioSistema",
   "actualizarUsuario", "eliminarUsuarioSistema", "validarIntegridad", "inicializarHojas", "repararFechasMovimientosVenta"
@@ -66,6 +66,7 @@ export async function POST(request: Request) {
         if(body.fn==="generarCodigoImpresion")return NextResponse.json({ok:true,resultado:await issueNativePrintCode(body.args?.[0])});
         if(body.fn==="corregirPedido")return NextResponse.json({ok:true,resultado:await correctNativeOrder(String(body.token||""),(body.args?.[0]||{}) as Record<string,unknown>)});
         if(body.fn==="registrarMovimientoFinanciero")return NextResponse.json({ok:true,resultado:await saveNativeFinancialMovement(current.user.id,(body.args?.[0]||{}) as Record<string,unknown>)});
+        if(body.fn==="obtenerResumenFinanciero")return NextResponse.json({ok:true,resultado:await getNativeFinanceSnapshot(body.args?.[0])});
         if(body.fn==="obtenerPlaneamientoMensual")return NextResponse.json({ok:true,resultado:await getNativePlan(body.args?.[0])});
         if(body.fn==="guardarPlaneamientoMensual")return NextResponse.json({ok:true,resultado:await saveNativePlan((body.args?.[0]||{}) as Record<string,unknown>)});
         if(body.fn==="duplicarPlaneamientoMensualAnterior")return NextResponse.json({ok:true,resultado:await duplicateNativePlan(body.args?.[0])});
