@@ -277,7 +277,7 @@ function offlineResult(fn: string): unknown {
 }
 async function measured<T>(label: string, action: () => Promise<T>): Promise<T> { const started = performance.now(); try { return await action(); } finally { if (process.env.NODE_ENV !== "production") console.info(`[PERF] ${label}: ${Math.round(performance.now() - started)}ms`); } }
 async function api<T>(fn: string, args: unknown[] = [], token = ""): Promise<T> {
-    const response = await fetch("/api/qaso", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fn, args, token }) });
+    const response = await fetch("/api/qaso", { method: "POST", cache: "no-store", headers: { "content-type": "application/json", "x-nexo-request": crypto.randomUUID() }, body: JSON.stringify({ fn, args, token }) });
     const envelope = await response.json();
     if (!response.ok || envelope.ok === false)
         throw new Error(envelope.message || envelope.error || "No se pudo consultar Google Sheets.");
@@ -467,7 +467,7 @@ export default function Home() {
                 return;
             }
             if (active === "Pedidos y emisión") {
-                const o = await call<Order[]>("obtenerCobranzaPedidos", [{ desde: "2020-01-01", hasta: today() }]);
+                const o = await call<Order[]>("obtenerEmisiones", [{}]);
                 const unique = dedupeOrders(o || []);
                 setOrders(unique);
                 cacheSet("nexo_orders", unique);
@@ -1023,7 +1023,16 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
         const iso = (date: Date) => date.toISOString().slice(0, 10);
         return dateFilter === "PERSONALIZADO" ? { from: dateFrom, to: dateTo } : { from: iso(start), to: iso(end) };
     }, [dateFilter, dateFrom, dateTo]);
-    const visible = uniqueOrders.filter(o => { const orderDate = new Date(orderTab === "ENTREGADO" && o.fechaEntrega ? o.fechaEntrega : o.fecha).toISOString().slice(0,10); const matchesState = orderTab === "COBRANZA" ? receivableOrders.some(row => row.ventaId === o.ventaId) : stateOf(o) === orderTab; const issueText = `${o.estadoEntrega || ""} ${o.subestadoOperativo || ""} ${o.motivoIncidencia || ""}`.toUpperCase(); return matchesState && (!issueFilter || issueText.includes(issueFilter)) && orderDate >= range.from && orderDate <= range.to && (clientFilter === "TODOS" || o.cliente === clientFilter) && JSON.stringify(o).toLowerCase().includes(query.toLowerCase()); });
+    const orderDateKey = (value: string, code = "") => {
+        const text = String(value || "");
+        const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+        const local = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (local) return `${local[3]}-${local[2].padStart(2,"0")}-${local[1].padStart(2,"0")}`;
+        const embedded = String(code).match(/V-(\d{4})(\d{2})(\d{2})/);
+        return embedded ? `${embedded[1]}-${embedded[2]}-${embedded[3]}` : "";
+    };
+    const visible = uniqueOrders.filter(o => { const orderDate = orderDateKey(orderTab === "ENTREGADO" && o.fechaEntrega ? o.fechaEntrega : o.fecha, o.ventaId); const matchesState = orderTab === "COBRANZA" ? receivableOrders.some(row => row.ventaId === o.ventaId) : stateOf(o) === orderTab; const issueText = `${o.estadoEntrega || ""} ${o.subestadoOperativo || ""} ${o.motivoIncidencia || ""}`.toUpperCase(); return matchesState && (!issueFilter || issueText.includes(issueFilter)) && orderDate >= range.from && orderDate <= range.to && (clientFilter === "TODOS" || o.cliente === clientFilter) && JSON.stringify(o).toLowerCase().includes(query.toLowerCase()); });
     const recentVisible = visible.slice(0, 10);
     const allPageSize = 25;
     const allPageCount = Math.max(1, Math.ceil(visible.length / allPageSize));
