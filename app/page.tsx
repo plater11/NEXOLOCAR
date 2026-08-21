@@ -639,16 +639,21 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
         if (!match) return "";
         return match[4] ? `${match[4]}-${String(match[5]).padStart(2, "0")}-${String(match[6]).padStart(2, "0")}` : `${match[3]}-${String(match[2]).padStart(2, "0")}-${String(match[1]).padStart(2, "0")}`;
     };
-    const todayOrders = orders.filter(o => orderDate(o.fecha) === today());
-    const monthOrders = orders.filter(o => orderDate(o.fecha).startsWith(month()));
-    const salesToday = todayOrders.reduce((a, o) => a + Number(o.total || 0), 0);
-    const salesMonth = monthOrders.reduce((a, o) => a + Number(o.total || 0), 0);
-    const ticketAverage = monthOrders.length ? salesMonth / monthOrders.length : 0;
-    const [monthlyGoal] = useState(() => cacheGet<number>("nexo_monthly_goal", 20000));
+    const validOrders = orders.filter(o => !["ANULADO", "CANCELADO"].includes(String(o.estadoOperativo || o.estadoEntrega || "").toUpperCase()));
+    const todayOrders = validOrders.filter(o => orderDate(o.fecha) === today());
+    const monthOrders = validOrders.filter(o => orderDate(o.fecha).startsWith(month()));
+    const presalesToday = todayOrders.reduce((a, o) => a + Number(o.total || 0), 0);
+    const presalesMonth = monthOrders.reduce((a, o) => a + Number(o.total || 0), 0);
+    const todayDate = new Date(`${today()}T12:00:00`);
+    const weekStartDate = new Date(todayDate);
+    weekStartDate.setDate(todayDate.getDate() - ((todayDate.getDay() + 6) % 7));
+    const weekStart = `${weekStartDate.getFullYear()}-${String(weekStartDate.getMonth() + 1).padStart(2, "0")}-${String(weekStartDate.getDate()).padStart(2, "0")}`;
+    const weekOrders = validOrders.filter(o => { const date = orderDate(o.fecha); return date >= weekStart && date <= today(); });
+    const weeklyTicket = weekOrders.length ? weekOrders.reduce((sum, o) => sum + Number(o.total || 0), 0) / weekOrders.length : 0;
+    const monthlyTicket = monthOrders.length ? presalesMonth / monthOrders.length : 0;
     const [birthdayOpen, setBirthdayOpen] = useState(false);
     const [closeOpen, setCloseOpen] = useState(false);
     const [closingPeriod, setClosingPeriod] = useState(false);
-    const [ticketFlash, setTicketFlash] = useState(false);
     if (!summary) return <div className="manager-home home-loading" aria-busy="true" aria-label="Cargando resumen operativo">
         <div className="home-skeleton skeleton-heading"></div>
         <section className="executive-metrics skeleton-grid">{Array.from({ length: 5 }, (_, index) => <article className="home-skeleton" key={index}></article>)}</section>
@@ -657,8 +662,6 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
     </div>;
     const birthdays = clients.filter(c => String(c.estado || "ACTIVO").toUpperCase() !== "INACTIVO" && Boolean(c.fechaCumpleanos) && birthdayDays(c.fechaCumpleanos) >= 0 && birthdayDays(c.fechaCumpleanos) <= 7).sort((a, b) => birthdayDays(a.fechaCumpleanos) - birthdayDays(b.fechaCumpleanos));
     const birthdayCount = birthdays.length;
-    const debts = receivables.filter(o => String(o.estadoEntrega).toUpperCase() === "ENTREGADO" && Number(o.saldo || 0) > .01).sort((a, b) => daysSince(b.fechaEntrega || b.fecha) - daysSince(a.fechaEntrega || a.fecha));
-    const debtTotal = debts.reduce((sum, o) => sum + Number(o.saldo || 0), 0);
     const deliveredToday = { label: "ENTREGADOS HOY", state: "ENTREGADO", rows: [] as Order[], count: Number(summary?.entregadosHoy || 0), total: Number(summary?.importeEntregadoHoy || 0), todayOnly: true };
     const operationalCards = [
         { label: "POR COMPRAR", state: "POR_COMPRAR", rows: orders.filter(o => normalizeOperationalState(o.estadoOperativo || o.estadoEntrega) === "POR_COMPRAR") },
@@ -673,6 +676,13 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
     const routeOrders = orders.filter(o => String(o.estadoEntrega || "").toUpperCase().replace(/\s+/g, "_") === "EN_RUTA");
     const buyingOrders = operationalCards[0].rows;
     const readyOrders = operationalCards[1].rows;
+    const buyingTotal = buyingOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+    const effectiveSalesRows = receivables.filter(order => {
+        const delivered = ["ENTREGADO", "ENTREGA_COMPLETA"].includes(String(order.estadoEntrega || "").toUpperCase().replace(/\s+/g, "_"));
+        const paid = String(order.estadoCobro || "").toUpperCase() === "COBRADO" || Number(order.totalCobrado || 0) >= Number(order.total || 0) - .01;
+        return delivered && paid && orderDate(order.fechaEntrega || order.fecha).startsWith(month());
+    });
+    const effectiveSales = effectiveSalesRows.reduce((sum, order) => sum + Number(order.total || 0), 0);
     const pluralOrders = (value: number) => `${value} ${value === 1 ? "pedido" : "pedidos"}`;
     const periodDate = new Date(`${summary.periodo?.periodo || `${month()}-01`}T12:00:00`);
     const periodLabel = periodDate.toLocaleDateString("es-PE", { month: "long", year: "numeric" });
@@ -726,16 +736,13 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
         if (item.entidad === "CLIENTE") { onNavigate("Clientes"); return; }
         onNavigate("Productos e inventario");
     };
-    const dashboardSales = Number(summary.ventasMes ?? salesMonth);
-    const dashboardGoal = Number(summary.metaMensual || monthlyGoal);
-    const dashboardGoalProgress = dashboardGoal > 0 ? Math.min(100, dashboardSales / dashboardGoal * 100) : 0;
     return <div className="manager-home control-center-home">
         <section className="period-control-card"><div><h2>Tu operación,<br/>en una sola vista.</h2><small>PERÍODO DE OPERACIÓN · {periodLabel.toUpperCase()}</small><p>▣ Día {currentDay} de {daysInMonth} · {elapsedPercent}% transcurrido</p><div className="period-progress"><i style={{width:`${elapsedPercent}%`}}></i><b>{elapsedPercent}%</b></div><span>{remainingDays} días restantes</span></div><aside>{["MASTER","ADMINISTRADOR"].includes(String(session.perfil).toUpperCase()) && <button onClick={() => setCloseOpen(true)}>▣ CERRAR PERÍODO</button>}<strong>● Período {String(summary.periodo?.estado || "ABIERTO").toLowerCase()}</strong>{summary.periodo?.cierreAnterior && <p>Cierre anterior: {new Date(`${summary.periodo.cierreAnterior.periodo}T12:00:00`).toLocaleDateString("es-PE",{month:"long",year:"numeric"})}<br/>por {summary.periodo.cierreAnterior.usuario} · {new Date(summary.periodo.cierreAnterior.fecha).toLocaleString("es-PE")}</p>}</aside></section>
         <section className="executive-metrics financial-control-grid">
-            <button className="goal-card" onClick={() => { cacheSet("nexo_report_period", month()); onNavigate("Reportes"); }}><span>Ventas del mes</span><strong>{money(dashboardSales)}</strong><small>Meta: {money(dashboardGoal)} · {dashboardGoalProgress.toFixed(0)}%</small><div className="goal-progress"><i style={{width:`${dashboardGoalProgress}%`}}></i></div><small>Hoy: {money(summary.ventasHoy ?? salesToday)}</small></button>
-            <button onClick={() => openOrders("COBRANZA")}><span>Cobrado del mes</span><strong>{money(summary.cobradoMes)}</strong><small>{dashboardSales ? (Number(summary.cobradoMes || 0) / dashboardSales * 100).toFixed(0) : 0}% de ventas</small></button>
-            <button onClick={() => openOrders("COBRANZA", "PENDIENTE")}><span>Por cobrar</span><strong>{money(summary.porCobrar ?? debtTotal)}</strong><small>{summary.clientesPorCobrar ?? debts.length} clientes</small></button>
-            <button className={ticketFlash ? "metric-flash" : ""} onClick={() => { setTicketFlash(true); window.setTimeout(() => setTicketFlash(false), 260); }}><span>Ticket promedio</span><strong>{money(summary.ticketPromedio ?? ticketAverage)}</strong><small>{summary.ventasCantidadMes ?? monthOrders.length} ventas este mes</small></button>
+            <button className="presales-metric" onClick={() => openOrders("POR_COMPRAR")}><span>Preventas del mes</span><strong>{money(presalesMonth)}</strong><small>{pluralOrders(monthOrders.length)} creados · hoy {money(presalesToday)}</small></button>
+            <button className="effective-sales-metric" onClick={() => openOrders("ENTREGADO")}><span>Ventas efectivas</span><strong>{money(effectiveSales)}</strong><small>{pluralOrders(effectiveSalesRows.length)} entregados y cobrados</small></button>
+            <button className="buying-metric" onClick={() => openOrders("POR_COMPRAR")}><span>Por comprar</span><strong>{money(buyingTotal)}</strong><small>{pluralOrders(buyingOrders.length)} pendientes de abastecimiento</small></button>
+            <button className="ticket-metric" onClick={() => { cacheSet("nexo_report_period", month()); onNavigate("Reportes"); }}><span>Ticket promedio</span><div className="ticket-pair"><b><small>Semanal</small>{money(weeklyTicket)}</b><b><small>Mensual</small>{money(monthlyTicket)}</b></div><small>{weekOrders.length} esta semana · {monthOrders.length} este mes</small></button>
         </section>
         <div className="home-control-grid"><section className="birthday-panel"><header><h3>🎂 CUMPLEAÑOS PRÓXIMOS</h3><button onClick={() => setBirthdayOpen(true)}>Ver todos</button></header>{birthdays.slice(0,2).map(client=><button key={client.id} onClick={()=>{cacheSet("nexo_focus_client",client.id);onNavigate("Clientes");}}><b>{client.nombre} {client.apellidos}</b><small>{new Date(`${client.fechaCumpleanos}T12:00:00`).toLocaleDateString("es-PE",{day:"numeric",month:"long"})} · {birthdayDays(client.fechaCumpleanos)===0?"hoy":`en ${birthdayDays(client.fechaCumpleanos)} días`}</small><i>›</i></button>)}{!birthdays.length&&<p>Sin cumpleaños en los próximos 7 días.</p>}<footer>{birthdayCount} {birthdayCount===1?"cumpleaños":"cumpleaños"} en los próximos 7 días</footer></section><section className="next-actions alert-deviations"><header><small>CONTROL OPERATIVO</small><h3>Alertas y desviaciones</h3></header>{nextActions.length?<div>{nextActions.map(action=><button key={action.title} onClick={action.run}><span>{action.icon}</span><b>{action.title}<small>{action.label}</small></b><em>{action.value}</em><i>›</i></button>)}</div>:<div className="operation-current"><strong>✓ OPERACIÓN SIN ALERTAS CRÍTICAS</strong><p>No existen situaciones pendientes.</p></div>}</section></div>
         <section className="home-section-title"><h3>OPERACIÓN HOY</h3><button onClick={()=>onNavigate("Pedidos y emisión")}>Ver pedidos y emisión</button></section>

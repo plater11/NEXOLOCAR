@@ -264,3 +264,8 @@ body,.workspace,.content{background:var(--nv-bg)}
 .recent-activity .activity-row.activity-success{border-left-color:#2f9d70}.recent-activity .activity-row.activity-success>i{background:#e5f7ee;color:#147458}
 .recent-activity .activity-row.activity-observed{border-left-color:#8b64bb}.recent-activity .activity-row.activity-observed>i{background:var(--nv-lilac);color:var(--nv-lilac-ink)}
 .recent-activity .activity-row.activity-neutral>i{background:#eef1f5;color:#59667a}
+
+/* Inicio: indicadores financieros con alcance operativo explícito */
+.financial-control-grid>button:before{content:"";position:absolute;inset:0 auto 0 0;width:4px;border-radius:16px 0 0 16px;background:#d9e0ea}
+.financial-control-grid>button.presales-metric:before{background:#ff9f43}.financial-control-grid>button.effective-sales-metric:before{background:#25a56f}.financial-control-grid>button.buying-metric:before{background:#ff6759}.financial-control-grid>button.ticket-metric:before{background:#3b82d0}
+.ticket-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;gap:8px}.ticket-pair b{display:grid;gap:2px;color:var(--nv-text);font-size:1.05rem}.ticket-pair b+b{padding-left:8px;border-left:1px solid #e4e8ef}.ticket-pair b small{color:var(--nv-muted);font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
