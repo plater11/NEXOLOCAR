@@ -438,6 +438,16 @@ export default function Home() {
         window.addEventListener("nexo:data-invalidated", invalidated);
         return () => { window.clearTimeout(timer); window.removeEventListener("nexo:data-invalidated", invalidated); };
     }, [refreshSharedData]);
+    useEffect(() => {
+        if (!session) return;
+        const synchronizeTerminals = () => {
+            if (document.visibilityState === "visible" && navigator.onLine) void refreshSharedData(["dashboard", "orders", "activity"]);
+        };
+        const interval = window.setInterval(synchronizeTerminals, 20000);
+        window.addEventListener("focus", synchronizeTerminals);
+        document.addEventListener("visibilitychange", synchronizeTerminals);
+        return () => { window.clearInterval(interval); window.removeEventListener("focus", synchronizeTerminals); document.removeEventListener("visibilitychange", synchronizeTerminals); };
+    }, [refreshSharedData, session]);
     const refresh = useCallback(async () => {
         if (!session || !navigator.onLine)
             return;
@@ -696,6 +706,15 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
         const mapped: Record<string, string> = { NUEVO_PEDIDO: "POR COMPRAR", LISTO_ENTREGA: "LISTO PARA ENTREGA", EN_RUTA: "EN RUTA", ASIGNADO_JORNADA: "ASIGNADO A RUTA", ENTREGADO_COBRADO: "COBRADO", ENTREGADO_SIN_PAGO: "POR COBRAR", ENTREGADO_SIN_COBRAR: "POR COBRAR", RECHAZADO: "RECHAZADO", REPROGRAMADO: "REPROGRAMADO", NUEVO_STOCK: "INGRESO DE STOCK", GASTO_REGISTRADO: "PENDIENTE DE APROBACIÓN" };
         return mapped[type] || String(item.estado || "").replace(/_/g, " ") || "REGISTRADO";
     };
+    const activityTone = (item: ActivityRecord) => {
+        const state = `${activityState(item)} ${item.tipo || ""} ${item.descripcion || ""}`.toUpperCase();
+        if (/RECHAZ|OBSERV|NO APLICA|AUSENTE|INCIDENCIA/.test(state)) return "observed";
+        if (/ENTREGADO|COBRADO|APROBADO|VALIDADO/.test(state)) return "success";
+        if (/EN RUTA|ASIGNADO/.test(state)) return "route";
+        if (/LISTO/.test(state)) return "ready";
+        if (/POR COMPRAR|NUEVO PEDIDO|PENDIENTE/.test(state)) return "pending";
+        return "neutral";
+    };
     const activityLabel = (item: ActivityRecord) => {
         const type = String(item.tipo || "").toUpperCase();
         const labels: Record<string, string> = { NUEVO_PEDIDO: "NUEVO PEDIDO", LISTO_ENTREGA: "LISTO PARA ENTREGA", EN_RUTA: "EN RUTA", ASIGNADO_JORNADA: "ASIGNADO A RUTA", ENTREGADO_COBRADO: "ENTREGADO Y COBRADO", ENTREGADO_SIN_PAGO: "ENTREGADO SIN PAGO", ENTREGADO_SIN_COBRAR: "ENTREGADO SIN PAGO", RECHAZADO: "PEDIDO RECHAZADO", REPROGRAMADO: "PEDIDO REPROGRAMADO", NUEVO_STOCK: "INGRESO DE STOCK", GASTO_REGISTRADO: "GASTO REGISTRADO" };
@@ -722,7 +741,7 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
         <section className="home-section-title"><h3>OPERACIÓN HOY</h3><button onClick={()=>onNavigate("Pedidos y emisión")}>Ver pedidos y emisión</button></section>
         <section className="operational-home-grid">{operationalCards.map(card=>{const count="count" in card?card.count:card.rows.length;const total="total" in card?card.total:card.rows.reduce((sum,order)=>sum+Number(order.total||0),0);return <button key={card.state} onClick={()=>openOrders(card.state,"","todayOnly" in card&&Boolean(card.todayOnly))}><small>{card.label}</small><strong>{pluralOrders(count)}</strong><span>{money(total)}</span></button>;})}</section>
         <section className="manager-secondary-metrics"><button onClick={()=>onNavigate("Clientes")}><p>Clientes registrados</p><strong>{summary.totalClientes||clients.length}</strong><small>{inactiveClients.length} sin compra +30 días</small></button><button onClick={()=>onNavigate("Productos e inventario")}><p>Productos</p><strong>{summary.totalProductos||0}</strong><small>{summary.stockBajo||0} con stock bajo</small></button><button onClick={()=>onNavigate("Productos e inventario")}><p>Valor de inventario</p><strong>{money(summary.valorTotalInventario)}</strong><small>{summary.conStock||0} con stock · {summary.sinStock||0} sin stock</small></button></section>
-        <section className="panel recent-activity"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Últimos movimientos del sistema</p></div><button onClick={()=>onNavigate("Reportes")}>Ver todas</button></div><div>{activities.slice(0,5).map(item=><button className="activity-row" key={item.id} onClick={()=>openActivity(item)}><time>{new Date(item.fecha).toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"})}</time><span><b>{activityLabel(item)}</b><small>{item.cliente||"Operación del ERP"}{item.ubicacion?` · ${item.ubicacion}`:""}</small><em>{item.descripcion||"Sin comentario"}</em></span>{item.monto>0&&<strong>{money(item.monto)}</strong>}<i>{activityState(item)}</i></button>)}{!activities.length&&<p className="empty-activity">Aún no existen operaciones registradas.</p>}</div></section>
+        <section className="panel recent-activity"><div className="panel-title"><div><h3>Operaciones recientes</h3><p>Últimos movimientos del sistema</p></div><button onClick={()=>onNavigate("Reportes")}>Ver todas</button></div><div>{activities.slice(0,5).map(item=><button className={`activity-row activity-${activityTone(item)}`} key={item.id} onClick={()=>openActivity(item)}><time>{new Date(item.fecha).toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"})}</time><span><b>{activityLabel(item)}</b><small>{item.cliente||"Operación del ERP"}{item.ubicacion?` · ${item.ubicacion}`:""}</small><em>{item.descripcion||"Sin comentario"}</em></span>{item.monto>0&&<strong>{money(item.monto)}</strong>}<i>{activityState(item)}</i></button>)}{!activities.length&&<p className="empty-activity">Aún no existen operaciones registradas.</p>}</div></section>
         {birthdayOpen&&<div className="modal-bg" onMouseDown={event=>{if(event.target===event.currentTarget)setBirthdayOpen(false);}}><section className="birthday-list-modal" role="dialog" aria-modal="true"><header><div><small>PRÓXIMOS 7 DÍAS</small><h2>Cumpleaños próximos</h2></div><button onClick={()=>setBirthdayOpen(false)}>×</button></header><div>{birthdays.map(client=><article key={client.id}><button onClick={()=>{cacheSet("nexo_focus_client",client.id);onNavigate("Clientes");}}><span><b>{client.nombre} {client.apellidos}</b><small>{client.contacto||"Sin teléfono"}</small></span><strong>{birthdayDays(client.fechaCumpleanos)===0?"Hoy":`En ${birthdayDays(client.fechaCumpleanos)} día(s)`}</strong></button></article>)}{!birthdays.length&&<p>0 cumpleaños próximos.</p>}</div></section></div>}
         {closeOpen&&<div className="modal-bg"><section className="period-close-modal"><header><div><small>CIERRE OPERATIVO</small><h2>Cerrar {periodLabel}</h2></div><button onClick={()=>setCloseOpen(false)}>×</button></header><div className="period-close-summary"><span>Ventas <b>{money(summary.ventasMes)}</b></span><span>Cobrado <b>{money(summary.cobradoMes)}</b></span><span>Por cobrar <b>{money(summary.porCobrar)}</b></span><span>Compras <b>{money(summary.comprasMes)}</b></span><span>Gastos <b>{money(summary.gastosMes)}</b></span><span>Resultado <b>{money(summary.resultadoMes)}</b></span><span>Stock valorizado <b>{money(summary.valorTotalInventario)}</b></span></div><div className="period-pending"><h3>Pendientes antes del cierre</h3><p>{buyingOrders.length+readyOrders.length+routeOrders.length} pedidos · {summary.clientesPorCobrar||0} cobranzas · {summary.rendicionesPendientes||0} rendiciones</p><small>El cierre guardará una fotografía del período, protegerá sus transacciones y abrirá el siguiente mes.</small></div><footer><button onClick={()=>setCloseOpen(false)}>Cancelar</button><button className="primary" disabled={closingPeriod} onClick={closePeriod}>{closingPeriod?"Cerrando…":"Confirmar cierre"}</button></footer></section></div>}
     </div>;
@@ -981,7 +1000,7 @@ function Orders({ orders, call, refresh, notify, onOrderUpdated }: {
     const [editObs, setEditObs] = useState("");
     const [editItems, setEditItems] = useState<Array<{ codigo: string; nombre: string; cantidad: number; precioUnitario: number }>>([]);
     const states = ["POR_COMPRAR", "LISTO_PARA_ENTREGA", "EN_RUTA", "ENTREGADO", "OBSERVADO", "COBRANZA"];
-    const uniqueOrders = useMemo(() => dedupeOrders(orders), [orders]);
+    const uniqueOrders = useMemo(() => dedupeOrders(orders).sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()), [orders]);
     const stateOf = (o: Order) => {
         const delivery = String(o.estadoEntrega || "").toUpperCase().replace(/\s+/g, "_");
         const issue = `${o.subestadoOperativo || ""} ${o.motivoIncidencia || ""}`.toUpperCase().replace(/\s+/g, "_");
