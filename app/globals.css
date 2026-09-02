@@ -304,3 +304,21 @@ body,.workspace,.content{background:var(--nv-bg)}
  .order-sticky-actions>div{grid-template-columns:1fr 1fr}.order-sticky-actions>div>:last-child:nth-child(odd){grid-column:1/-1}
  .order-sticky-actions button{min-height:46px;font-size:.64rem}.order-sticky-actions .primary{font-size:.66rem}
 }
+
+/* Compact, actionable dashboard support cards */
+.home-control-side{display:grid;align-content:start;gap:10px;min-width:0}
+.home-control-side .manager-secondary-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}
+.home-control-side .manager-secondary-metrics button{position:relative;min-height:68px;padding:10px 11px;border:1px solid var(--nv-line);border-radius:12px;background:#fff;cursor:pointer}
+.home-control-side .manager-secondary-metrics p{margin:0;font-size:.58rem}
+.home-control-side .manager-secondary-metrics strong{font-size:1rem;line-height:1.15;overflow:hidden;text-overflow:ellipsis}
+.home-control-side .manager-secondary-metrics small{font-size:.57rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-control-side .manager-secondary-metrics i{position:absolute;right:9px;top:9px;color:#2775d4;font-size:.57rem;font-style:normal;font-weight:800}
+@media(max-width:760px){
+  .home-control-side{gap:8px}
+  .home-control-side .manager-secondary-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .home-control-side .manager-secondary-metrics button{min-height:64px;padding:9px 7px}
+  .home-control-side .manager-secondary-metrics p{font-size:.5rem}
+  .home-control-side .manager-secondary-metrics strong{font-size:.85rem}
+  .home-control-side .manager-secondary-metrics small{font-size:.48rem}
+  .home-control-side .manager-secondary-metrics i{display:none}
+}
