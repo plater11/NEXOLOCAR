@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./nexa-responsive.css";
 
 export const metadata: Metadata = {
   title: "NEXA GROUP | Gestión comercial",

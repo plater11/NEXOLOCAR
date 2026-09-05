@@ -1,0 +1,243 @@
+/* NEXA GROUP responsive application layer.
+   Loaded after the legacy stylesheet so every module shares one predictable
+   desktop / tablet / mobile behavior without changing its data workflow. */
+
+:root {
+  --nexa-header: 72px;
+  --nexa-mobile-nav: 72px;
+  --nexa-radius-sm: 12px;
+  --nexa-radius: 16px;
+  --nexa-shadow: 0 1px 3px rgba(15, 23, 42, .04), 0 4px 12px rgba(15, 23, 42, .025);
+}
+
+img, svg, canvas { max-width: 100%; }
+input, select, textarea { min-width: 0; }
+table { border-collapse: collapse; width: 100%; }
+.table-wrap { width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.panel, .section-heading { min-width: 0; }
+.panel { border-radius: var(--nexa-radius); }
+.section-heading { border-radius: 18px; }
+.section-heading h2 { letter-spacing: -.025em; }
+.section-heading p { color: var(--nv-muted); line-height: 1.55; }
+button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+button:disabled { cursor: not-allowed; opacity: .58; }
+.modal-bg { padding: clamp(10px, 2vw, 24px); }
+.modal, .order-dialog, .client-profile, .finance-budget-modal,
+.period-close-modal, .journey-detail-modal, .all-orders-modal {
+  max-width: min(100%, 960px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+}
+.modal input, .modal select, .modal textarea,
+.filter-panel input, .filter-panel select,
+.report-filters input, .report-filters select {
+  min-height: 44px;
+  border-color: var(--nv-line);
+  border-radius: var(--nexa-radius-sm);
+  background: #fff;
+}
+.modal footer, .order-actions { background: rgba(255,255,255,.96); backdrop-filter: blur(10px); }
+.empty-state, .report-empty, .route-empty, .pos-empty { color: var(--nv-muted); }
+
+/* Dashboard */
+.control-center-home, .clients-page, .orders-page, .finance-intelligence,
+.reports-page, .pos-page { min-width: 0; }
+.financial-control-grid > button,
+.operational-home-grid > button,
+.manager-secondary-metrics button { cursor: pointer; }
+.financial-control-grid > button:hover,
+.operational-home-grid > button:hover { border-color: rgba(217,101,9,.34); }
+
+/* Clients */
+.clients-search-tools, .order-period-tools, .finance-controlbar,
+.report-filters, .product-tools { min-width: 0; }
+.client-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.client-card { min-width: 0; }
+.client-card-copy { min-width: 0; }
+.client-card-copy strong, .client-card-copy small { overflow: hidden; text-overflow: ellipsis; }
+.client-profile { width: min(760px, 100%); }
+
+/* Sales and cart */
+.pos-workspace, .pos-browser, .cart-v2 { min-width: 0; }
+.pos-product-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.pos-product { border-radius: var(--nexa-radius-sm); }
+.pos-product-main { min-width: 0; }
+.pos-product-copy { min-width: 0; }
+.pos-product-copy b, .pos-product-copy small { overflow: hidden; text-overflow: ellipsis; }
+.pos-cart-sheet-v2, .pos-filter-sheet { width: min(520px, 100%); }
+
+/* Orders */
+.order-state-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.order-state-tabs button { min-width: 0; min-height: 46px; }
+.order-card-list { min-width: 0; }
+.order-card-main { min-width: 0; }
+.order-dialog { width: min(760px, 100%); }
+.flow-order-detail { width: min(760px, 100%); }
+.delivery-products, .preparation-control { min-width: 0; }
+
+/* Inventory */
+.materials-tabs, .route-tabs, .finance-period-chips {
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+}
+.materials-tabs::-webkit-scrollbar, .route-tabs::-webkit-scrollbar,
+.finance-period-chips::-webkit-scrollbar { display: none; }
+.material-form, .bulk-zone, .data-panel { min-width: 0; }
+.bulk-preview { max-height: 52dvh; }
+.bulk-actions { flex-wrap: wrap; }
+
+/* Renditions and finance */
+.weekly-control, .weekly-comparison, .weekly-rendition,
+.weekly-category-table, .weekly-movements { min-width: 0; }
+.weekly-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.weekly-detail-grid { grid-template-columns: minmax(0, .9fr) minmax(0, 1.5fr); }
+.finance-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.finance-bi-grid { grid-template-columns: minmax(0, 1.55fr) minmax(260px, .45fr); }
+.control-summary-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.budget-lines article { min-width: 0; }
+
+/* Reports, analytics, settings */
+.report-filters { grid-template-columns: repeat(5, minmax(120px, 1fr)); }
+.report-search { grid-column: span 2; }
+.analysis-main-grid { grid-template-columns: minmax(0, 1.5fr) minmax(280px, .5fr); }
+.ranking-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.user-filterbar { grid-template-columns: minmax(220px, 1fr) minmax(180px, .35fr); }
+.permission-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* Compact desktop / tablet landscape */
+@media (min-width: 901px) and (max-width: 1180px) {
+  .sidebar { width: 88px; padding-inline: 10px; }
+  .workspace { margin-left: 88px; width: calc(100% - 88px); }
+  .sidebar .brand { justify-content: center; padding-inline: 0; }
+  .sidebar .brand > div, .sidebar nav button:not(.active) i,
+  .sidebar .profile > div, .sidebar .profile > button { display: none; }
+  .sidebar nav button { justify-content: center; padding-inline: 8px; font-size: 0; }
+  .sidebar nav button span { width: auto; font-size: 21px; }
+  .sidebar .profile { justify-content: center; padding-inline: 0; }
+  .content { padding-inline: 20px; }
+  .financial-control-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .home-control-grid { grid-template-columns: minmax(0,.8fr) minmax(0,1.2fr); }
+  .weekly-kpis { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .finance-kpi-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .permission-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+
+/* Tablet and mobile navigation */
+@media (max-width: 900px) {
+  :root { --nexa-header: 62px; }
+  .topbar { position: sticky; top: 0; z-index: 30; }
+  .top-actions > button { display: none; }
+  .content { width: 100%; max-width: none; }
+  .section-heading { align-items: center; }
+  .section-heading > div { min-width: 0; }
+  .section-heading > :last-child:not(div) { flex: 0 0 auto; }
+  .financial-control-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .home-control-grid { grid-template-columns: 1fr; }
+  .client-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .order-state-tabs { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .pos-product-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .weekly-kpis { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .weekly-detail-grid, .finance-bi-grid, .analysis-main-grid { grid-template-columns: 1fr; }
+  .finance-kpi-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .report-filters { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .report-search { grid-column: 1 / -1; }
+  .permission-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+
+/* Phones */
+@media (max-width: 600px) {
+  :root { --nexa-radius: 14px; }
+  .content { padding: 10px 10px calc(var(--nexa-mobile-nav) + env(safe-area-inset-bottom,0px) + 14px); }
+  .topbar { padding-inline: 12px; }
+  .topbar > div:first-child { min-width: 0; }
+  .topbar h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sync-pill { max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section-heading { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; padding: 12px; margin-bottom: 9px; }
+  .section-heading .eyebrow, .section-heading p { display: none; }
+  .section-heading h2 { margin: 0; font-size: 1.08rem; }
+  .section-heading button { min-height: 42px; }
+  .panel { border-radius: 13px; }
+  .panel-title { gap: 8px; }
+  .panel-title h3 { font-size: .82rem; }
+  .panel-title p { font-size: .62rem; }
+
+  .financial-control-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px; }
+  .financial-control-grid > button { min-height: 96px; padding: 10px; }
+  .operational-home-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px; }
+  .operational-home-grid > button { min-height: 78px; padding: 10px; }
+  .operational-home-grid > button:last-child:nth-child(odd) { grid-column: 1/-1; }
+  .manager-secondary-metrics { grid-template-columns: repeat(3,minmax(0,1fr)) !important; }
+  .recent-activity .activity-row { grid-template-columns: 40px minmax(0,1fr) auto; }
+
+  .clients-search-tools { display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+  .clients-search-tools .search, .clients-search-tools input { min-width: 0; }
+  .client-grid { grid-template-columns: 1fr; gap: 8px; }
+  .client-card { min-height: 86px; padding: 11px; }
+  .client-profile-bg, .order-dialog-bg, .route-modal-bg,
+  .delivery-action-bg, .all-orders-bg, .pos-sheet-bg { align-items: end; padding: 0; }
+  .client-profile, .order-dialog, .flow-order-detail, .route-delivery-modal,
+  .delivery-action-modal, .all-orders-modal, .pos-filter-sheet,
+  .pos-cart-sheet-v2, .finance-budget-modal, .period-close-modal,
+  .journey-detail-modal {
+    width: 100%;
+    max-width: none;
+    max-height: 94dvh;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .pos-workspace { min-height: calc(100dvh - var(--nexa-header) - var(--nexa-mobile-nav)); }
+  .pos-product-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px; }
+  .pos-product { min-height: 138px; padding: 8px; }
+  .pos-search-row { grid-template-columns: minmax(0,1fr) auto; }
+  .cart-v2-list article { grid-template-columns: 36px minmax(0,1fr) auto; }
+
+  .order-state-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 3px; scrollbar-width: none; }
+  .order-state-tabs::-webkit-scrollbar { display:none; }
+  .order-state-tabs button { flex: 0 0 auto; min-width: 142px; min-height: 42px; }
+  .order-period-tools { grid-template-columns: 1fr; }
+  .bulk-order-bar { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 7px; }
+  .order-card-main { grid-template-columns: minmax(0,1fr) auto; }
+  .order-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .order-actions > :only-child, .order-actions > :last-child:nth-child(odd) { grid-column: 1/-1; }
+  .preparation-control article, .delivery-products article { min-width: 0; }
+
+  .materials-tabs, .route-tabs, .finance-period-chips { display:flex; overflow-x:auto; gap:6px; }
+  .materials-tabs button, .route-tabs button, .finance-period-chips button { flex:0 0 auto; min-height:42px; }
+  .material-form .form-row, .form-row { grid-template-columns: 1fr; }
+  .bulk-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .bulk-actions { display:grid; grid-template-columns:1fr 1fr; }
+  .bulk-actions > :last-child:nth-child(odd) { grid-column:1/-1; }
+
+  .weekly-control { display:grid; grid-template-columns:1fr auto; gap:8px; }
+  .weekly-kpis { display:flex; gap:7px; overflow-x:auto; scroll-snap-type:x mandatory; }
+  .weekly-kpis article { flex:0 0 76%; scroll-snap-align:start; }
+  .weekly-detail-grid { grid-template-columns:1fr; }
+  .weekly-mobile-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+  .weekly-mobile-actions button { min-height:44px; padding:7px; font-size:.65rem; }
+  .journey-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .journey-bottom-grid { grid-template-columns:1fr; }
+
+  .finance-controlbar { display:flex; overflow-x:auto; gap:7px; padding-bottom:3px; }
+  .finance-controlbar > * { flex:0 0 150px; }
+  .finance-kpi-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; gap:7px; }
+  .finance-kpi-grid article { min-height:90px; padding:10px; }
+  .control-summary-row { grid-template-columns:1fr; }
+  .budget-lines article { grid-template-columns:28px minmax(0,1fr) 72px 34px; }
+  .budget-lines article input:nth-of-type(2) { grid-column:2/5; }
+
+  .report-filters { grid-template-columns:1fr 1fr; gap:7px; padding:9px; }
+  .report-search { grid-column:1/-1; }
+  .report-table { display:none; }
+  .report-cards { display:grid; }
+  .analysis-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .ranking-grid { grid-template-columns:1fr; }
+  .user-filterbar { grid-template-columns:1fr; }
+  .user-access-head { align-items:flex-start; }
+  .user-card-actions { flex-direction:column; align-items:flex-end; }
+  .permission-grid { grid-template-columns:1fr; }
+  .config-secondary { grid-template-columns:1fr; }
+
+  .login-page { padding:14px; }
+  .login-card { width:100%; max-width:420px; padding:24px 20px; }
+  .login-brand .brand-logo { width:68px; height:52px; }
+}
