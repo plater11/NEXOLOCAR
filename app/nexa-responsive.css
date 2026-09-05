@@ -303,6 +303,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .stitch-heading-actions{display:flex;align-items:center;gap:8px}.stitch-heading-actions button{min-height:40px;padding:0 14px;border:1px solid var(--nv-line);border-radius:10px;background:#fff;font-size:.7rem;font-weight:800}.stitch-heading-actions .primary{border-color:var(--nv-primary);background:var(--nv-primary);color:#fff}
 .inventory-summary-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:10px}.inventory-summary-strip button{display:flex;align-items:center;justify-content:space-between;min-height:70px;padding:12px 15px;border:1px solid var(--nv-line);border-radius:14px;background:#fff;text-align:left;box-shadow:var(--nexa-shadow)}.inventory-summary-strip span{color:var(--nv-muted);font-size:.65rem;font-weight:800;text-transform:uppercase}.inventory-summary-strip b{font-size:1rem}.stitch-module-tabs{margin-bottom:10px;padding:5px;border:1px solid var(--nv-line);border-radius:13px;background:#fff}.stitch-module-tabs button{border:0!important;background:transparent!important}.stitch-module-tabs button.active{background:#0f2747!important;color:#fff!important}
 .orders-page>.section-heading,.inventory-page>.section-heading{background:linear-gradient(120deg,#fff 65%,#f8fafc)}
+.admin-view-tabs{display:flex;gap:6px;margin-bottom:10px;padding:5px;border:1px solid var(--nv-line);border-radius:13px;background:#fff}.admin-view-tabs button{min-height:39px;padding:0 16px;border:0;border-radius:9px;background:transparent;color:var(--nv-muted);font-size:.7rem;font-weight:800}.admin-view-tabs button.active{background:#0f2747;color:#fff}.settings-page>.maintenance-fold{min-height:280px}.settings-page>.maintenance-fold>summary{font-size:1rem;font-weight:850}
+.material-report-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:10px}.material-report-kpis article{display:grid;gap:5px;min-height:83px;padding:14px;border:1px solid var(--nv-line);border-radius:14px;background:#fff;box-shadow:var(--nexa-shadow)}.material-report-kpis small{color:var(--nv-muted);font-size:.62rem;font-weight:800;text-transform:uppercase}.material-report-kpis b{font-size:1.05rem}.material-report-page td>small{display:block;color:var(--nv-muted)}.material-report-page .report-state.low{background:#fff1f2;color:#be123c}
+.finance-module-tabs{position:sticky;top:72px;z-index:9;display:flex;gap:6px;margin-bottom:10px;padding:6px;border:1px solid var(--nv-line);border-radius:13px;background:rgba(255,255,255,.96);box-shadow:var(--nexa-shadow);overflow-x:auto}.finance-module-tabs button{flex:0 0 auto;min-height:36px;padding:0 13px;border:0;border-radius:8px;background:#f8fafc;color:#475569;font-size:.65rem;font-weight:800}.finance-module-tabs button:first-child{background:#0f2747;color:#fff}
 @media(max-width:900px){
  .stitch-appbar{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:center}
  .mobile-brand{display:flex;align-items:center;gap:7px}.mobile-brand img{width:30px;height:25px;object-fit:contain}.mobile-brand span{font-size:.66rem;font-weight:900;color:#0f2747}
@@ -310,6 +313,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
  .stitch-appbar .top-actions button span{display:none}
  .client-status-strip{grid-template-columns:repeat(3,1fr)}
  .inventory-summary-strip{grid-template-columns:repeat(3,minmax(150px,1fr));overflow-x:auto}.inventory-summary-strip button{min-height:62px}
+ .admin-view-tabs{overflow-x:auto}.admin-view-tabs button{flex:0 0 auto}
+ .material-report-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .finance-module-tabs{top:58px;margin-inline:-10px;border-radius:0;border-inline:0}
 }
 @media(max-width:600px){
  .stitch-appbar{height:58px!important;padding:7px 10px!important}
