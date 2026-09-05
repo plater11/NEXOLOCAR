@@ -287,3 +287,34 @@ button:disabled { cursor: not-allowed; opacity: .58; }
  .clients-page .client-card-copy small{font-size:.6rem}
  .clients-page .client-status{align-self:start;font-size:.52rem}
 }
+
+/* Structural port from the Stitch Modern Industrial B2B ERP screens */
+.grouped-sidebar{display:flex!important;flex-direction:column;gap:12px;padding:8px 12px!important;overflow-y:auto}
+.grouped-sidebar section{display:grid;gap:3px}
+.grouped-sidebar section>small{padding:7px 12px 4px;color:#94a3b8;font-size:.56rem;font-weight:900;letter-spacing:.13em}
+.grouped-sidebar button{display:grid!important;grid-template-columns:24px minmax(0,1fr) 14px;align-items:center;width:100%;min-height:39px;padding:7px 11px!important;border-radius:10px!important;text-align:left}
+.grouped-sidebar button span{font-size:.92rem}.grouped-sidebar button b{font-size:.69rem;font-weight:750}.grouped-sidebar button i{font-style:normal;color:var(--nv-primary)}
+.mobile-brand{display:none}.page-identity{min-width:0}
+.client-status-strip{display:grid;grid-template-columns:repeat(3,minmax(0,170px));gap:8px;margin:0 0 10px}
+.client-status-strip button{display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 14px;border:1px solid var(--nv-line);border-radius:13px;background:#fff;color:var(--nv-muted);font-size:.72rem;font-weight:800}
+.client-status-strip button b{display:grid;place-items:center;min-width:27px;height:27px;border-radius:9px;background:#f1f5f9;color:var(--nv-text)}
+.client-status-strip button.active{border-color:#fb923c;background:#fff7ed;color:#c2410c;box-shadow:0 4px 14px rgba(234,88,12,.09)}
+.client-status-strip button.active b{background:#ea580c;color:#fff}
+.stitch-heading-actions{display:flex;align-items:center;gap:8px}.stitch-heading-actions button{min-height:40px;padding:0 14px;border:1px solid var(--nv-line);border-radius:10px;background:#fff;font-size:.7rem;font-weight:800}.stitch-heading-actions .primary{border-color:var(--nv-primary);background:var(--nv-primary);color:#fff}
+.inventory-summary-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:10px}.inventory-summary-strip button{display:flex;align-items:center;justify-content:space-between;min-height:70px;padding:12px 15px;border:1px solid var(--nv-line);border-radius:14px;background:#fff;text-align:left;box-shadow:var(--nexa-shadow)}.inventory-summary-strip span{color:var(--nv-muted);font-size:.65rem;font-weight:800;text-transform:uppercase}.inventory-summary-strip b{font-size:1rem}.stitch-module-tabs{margin-bottom:10px;padding:5px;border:1px solid var(--nv-line);border-radius:13px;background:#fff}.stitch-module-tabs button{border:0!important;background:transparent!important}.stitch-module-tabs button.active{background:#0f2747!important;color:#fff!important}
+.orders-page>.section-heading,.inventory-page>.section-heading{background:linear-gradient(120deg,#fff 65%,#f8fafc)}
+@media(max-width:900px){
+ .stitch-appbar{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:center}
+ .mobile-brand{display:flex;align-items:center;gap:7px}.mobile-brand img{width:30px;height:25px;object-fit:contain}.mobile-brand span{font-size:.66rem;font-weight:900;color:#0f2747}
+ .page-identity small{display:none}.page-identity h1{font-size:.95rem!important}
+ .stitch-appbar .top-actions button span{display:none}
+ .client-status-strip{grid-template-columns:repeat(3,1fr)}
+ .inventory-summary-strip{grid-template-columns:repeat(3,minmax(150px,1fr));overflow-x:auto}.inventory-summary-strip button{min-height:62px}
+}
+@media(max-width:600px){
+ .stitch-appbar{height:58px!important;padding:7px 10px!important}
+ .mobile-brand span{display:none}.page-identity h1{font-size:.84rem!important}
+ .client-status-strip{gap:6px;margin-bottom:8px}.client-status-strip button{min-height:42px;padding:0 9px;font-size:.62rem}.client-status-strip button b{min-width:23px;height:23px;font-size:.62rem}
+ .clients-search-tools{position:sticky;top:58px;z-index:8;background:var(--nv-bg);padding:5px 0!important}
+ .stitch-heading-actions button span{display:none}.stitch-heading-actions button{padding:0 10px}.inventory-summary-strip{display:flex;gap:7px;scroll-snap-type:x mandatory}.inventory-summary-strip button{flex:0 0 72%;scroll-snap-align:start}.stitch-module-tabs{margin-inline:-10px;padding-inline:10px;border-left:0;border-right:0;border-radius:0}
+}
