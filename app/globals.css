@@ -322,3 +322,75 @@ body,.workspace,.content{background:var(--nv-bg)}
   .home-control-side .manager-secondary-metrics small{font-size:.48rem}
   .home-control-side .manager-secondary-metrics i{display:none}
 }
+/* NEXA GROUP · Modern Industrial B2B foundation */
+:root{
+  --nv-primary:#d96509;
+  --nv-primary-strong:#b45309;
+  --nv-primary-soft:#fff7ed;
+  --nv-positive:#0d9468;
+  --nv-positive-soft:#ecfdf5;
+  --nv-danger:#dc2626;
+  --nv-danger-soft:#fef2f2;
+  --nv-canvas:#f8fafc;
+  --nv-card:#ffffff;
+  --nv-text:#0f172a;
+  --nv-muted:#64748b;
+  --nv-line:#e2e8f0;
+  --navy:#0f172a;
+  --ink:#0f172a;
+  --muted:#64748b;
+  --line:#e2e8f0;
+  --coral:#d96509;
+  --cream:#f8fafc;
+}
+html{background:var(--nv-canvas)}
+body{background:var(--nv-canvas);color:var(--nv-text);font-family:Inter,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit}
+button{touch-action:manipulation}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgba(217,101,9,.18);outline-offset:2px}
+.sidebar{width:240px;padding:22px 14px 18px;background:#fff;color:var(--nv-text);border-right:1px solid var(--nv-line);box-shadow:2px 0 14px rgba(15,23,42,.025)}
+.workspace{margin-left:240px;width:calc(100% - 240px)}
+.brand{gap:10px;padding:0 8px 22px}
+.brand-logo{display:block;width:44px;height:44px;object-fit:contain;border-radius:10px;background:#fff}
+.brand strong{color:#07365f;font-size:15px;letter-spacing:.035em}
+.brand small,.profile small{color:var(--nv-muted);font-size:9px;letter-spacing:.035em}
+.sidebar nav{gap:4px}
+.sidebar nav button{min-height:44px;padding:10px 12px;border:1px solid transparent;border-radius:12px;color:#334155;font-weight:600}
+.sidebar nav button:hover{background:#f8fafc;border-color:#edf1f5;color:var(--nv-primary)}
+.sidebar nav button.active{background:var(--nv-primary);color:#fff;box-shadow:0 4px 12px rgba(217,101,9,.2)}
+.sidebar nav button.active span{color:#fff}
+.sidebar nav button i{background:#fff;color:var(--nv-primary)}
+.profile{border-top-color:var(--nv-line)}
+.profile>span,.avatar{background:#fff7ed;color:var(--nv-primary);border:1px solid #fed7aa;font-weight:800}
+.profile b{color:var(--nv-text)}
+.profile button{color:var(--nv-muted)}
+.topbar{height:72px;padding:0 28px;border-bottom-color:var(--nv-line);box-shadow:0 1px 5px rgba(15,23,42,.025)}
+.topbar h1{color:var(--nv-text);font-size:18px;letter-spacing:-.02em}
+.content{max-width:1440px;padding:22px 28px 46px}
+.primary{background:var(--nv-primary);border-radius:12px;box-shadow:0 5px 14px rgba(217,101,9,.2)}
+.primary:hover{background:var(--nv-primary-strong)}
+.sync-pill{border-color:var(--nv-line);background:#fff;color:var(--nv-muted)}
+.section-heading,.panel{border-color:var(--nv-line);box-shadow:0 1px 3px rgba(15,23,42,.04),0 4px 12px rgba(15,23,42,.02)}
+.eyebrow{color:var(--nv-primary)}
+.login-page{background:radial-gradient(circle at 18% 18%,#fff7ed 0,transparent 35%),radial-gradient(circle at 85% 80%,#ecfdf5 0,transparent 36%),#f8fafc}
+.login-card{border:1px solid var(--nv-line);box-shadow:0 18px 55px rgba(15,23,42,.1)}
+.login-brand{padding:0 0 18px}
+.login-brand .brand-logo{width:74px;height:58px;border-radius:0}
+.login-brand strong{font-size:18px}
+.login-brand small{font-size:10px}
+@media(max-width:900px){
+  .workspace{margin:0;width:100%}
+  .topbar{height:62px;padding:0 16px}
+  .content{padding:14px 12px calc(var(--mobile-nav-height) + var(--safe-bottom) + 16px)}
+  .mobile-nav{border-top-color:var(--nv-line);box-shadow:0 -4px 16px rgba(15,23,42,.06)}
+  .mobile-nav button{min-height:48px;color:var(--nv-muted)}
+  .mobile-nav button.active{background:var(--nv-primary-soft)!important;color:var(--nv-primary)!important}
+  .mobile-nav button.sale{background:var(--nv-primary)!important;color:#fff!important;border-color:#fff}
+  .mobile-more{background:var(--nv-card)}
+  .mobile-more-head strong{color:var(--nv-text)}
+}
+@media(max-width:480px){
+  .topbar h1{font-size:16px}
+  .sync-pill{max-width:124px}
+  .section-heading{border-radius:14px}
+}
