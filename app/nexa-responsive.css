@@ -241,3 +241,49 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .login-card { width:100%; max-width:420px; padding:24px 20px; }
   .login-brand .brand-logo { width:68px; height:52px; }
 }
+
+/* Stitch screen port: Dashboard + commercial directory */
+.stitch-dashboard-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;padding:20px 22px;background:#fff}
+.stitch-dashboard-head h2{margin:5px 0 3px;font-size:1.55rem}
+.stitch-dashboard-head p{margin:0 0 13px;color:var(--nv-muted);font-size:.78rem;font-weight:500}
+.stitch-brand-kicker{color:var(--nv-primary)!important;font-size:.62rem!important;font-weight:900;letter-spacing:.11em}
+.stitch-period-pills{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none}
+.stitch-period-pills button{min-height:34px;padding:0 14px;border:1px solid var(--nv-line);border-radius:999px;background:#fff;color:var(--nv-muted);font-size:.7rem;font-weight:700;white-space:nowrap}
+.stitch-period-pills button.active{border-color:var(--nv-primary);background:var(--nv-primary);color:#fff;box-shadow:0 3px 9px rgba(217,101,9,.2)}
+.stitch-dashboard-head aside{align-items:flex-end;gap:8px}
+.stitch-dashboard-head aside>button{min-height:40px;padding:0 14px;border:1px solid var(--nv-line);border-radius:11px;background:#fff;color:var(--nv-text);font-size:.7rem;font-weight:800}
+.stitch-dashboard-head aside>strong{margin:0;padding:5px 10px;font-size:.65rem}
+.financial-control-grid>button{overflow:hidden}
+.financial-control-grid .presales-metric{background:#fffcf7;border-color:#ffe8ce}
+.financial-control-grid .effective-sales-metric{background:#f7fdfa;border-color:#d1fae5}
+.financial-control-grid .buying-metric{background:#faf7fd;border-color:#eadcf6}
+.financial-control-grid .ticket-metric{background:#f8fafc;border-color:#e2e8f0}
+.financial-control-grid>button span{text-transform:uppercase;letter-spacing:.045em}
+.clients-page>.section-heading{background:linear-gradient(120deg,#fff 60%,#fff7ed)}
+.clients-page .client-grid{gap:10px}
+.clients-page .client-card{position:relative;border:1px solid var(--nv-line);border-radius:15px;background:#fff;box-shadow:var(--nexa-shadow);transition:.16s ease}
+.clients-page .client-card:hover{border-color:#fdba74;transform:translateY(-1px)}
+.clients-page .client-avatar{background:#fff3e8;color:var(--nv-primary)}
+.clients-page .client-status{background:#ecfdf5;color:#0d9468}
+.clients-page .client-modal h2:before{content:"";display:block;width:34px;height:4px;margin-bottom:10px;border-radius:999px;background:var(--nv-primary)}
+@media(max-width:600px){
+ .control-center-home{gap:9px}
+ .stitch-dashboard-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;padding:12px;border-radius:14px}
+ .stitch-dashboard-head h2{margin:2px 0 3px;font-size:1.3rem}
+ .stitch-dashboard-head p{margin-bottom:9px;font-size:.64rem}
+ .stitch-brand-kicker{display:none}
+ .stitch-dashboard-head aside>button{font-size:0;width:42px;padding:0}
+ .stitch-dashboard-head aside>button:after{content:"⋮";font-size:1.1rem}
+ .stitch-dashboard-head aside>strong{display:none}
+ .stitch-period-pills{grid-column:1/-1;margin-right:-50px;padding-right:50px}
+ .stitch-period-pills button{min-height:32px;padding:0 12px;font-size:.62rem}
+ .financial-control-grid>button{min-height:98px!important;border-radius:14px!important}
+ .financial-control-grid>button span{font-size:.52rem!important}
+ .financial-control-grid>button strong{font-size:1rem!important}
+ .home-control-grid>.birthday-panel{order:2}
+ .home-control-side{order:1}
+ .clients-page .client-card{display:grid;grid-template-columns:42px minmax(0,1fr) auto;min-height:78px;padding:10px}
+ .clients-page .client-card-copy b{font-size:.78rem}
+ .clients-page .client-card-copy small{font-size:.6rem}
+ .clients-page .client-status{align-self:start;font-size:.52rem}
+}
