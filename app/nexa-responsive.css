@@ -291,9 +291,13 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 /* Structural port from the Stitch Modern Industrial B2B ERP screens */
 .grouped-sidebar{display:flex!important;flex-direction:column;gap:12px;padding:8px 12px!important;overflow-y:auto}
 .grouped-sidebar section{display:grid;gap:3px}
-.grouped-sidebar section>small{padding:7px 12px 4px;color:#94a3b8;font-size:.56rem;font-weight:900;letter-spacing:.13em}
 .grouped-sidebar button{display:grid!important;grid-template-columns:24px minmax(0,1fr) 14px;align-items:center;width:100%;min-height:39px;padding:7px 11px!important;border-radius:10px!important;text-align:left}
 .grouped-sidebar button span{font-size:.92rem}.grouped-sidebar button b{font-size:.69rem;font-weight:750}.grouped-sidebar button i{font-style:normal;color:var(--nv-primary)}
+.grouped-sidebar .menu-group-toggle{min-height:34px!important;color:#64748b!important;background:transparent!important}
+.grouped-sidebar .menu-group-toggle b{font-size:.56rem;letter-spacing:.12em}.grouped-sidebar .menu-group-toggle i{color:#94a3b8}
+.grouped-sidebar .menu-group-items{display:grid;gap:3px;max-height:0;overflow:hidden;opacity:0;transition:max-height .22s ease,opacity .16s ease}
+.grouped-sidebar section.open .menu-group-items{max-height:360px;opacity:1}
+.grouped-sidebar section.open .menu-group-toggle{color:#0f2747!important}
 .mobile-brand{display:none}.page-identity{min-width:0}
 .client-status-strip{display:grid;grid-template-columns:repeat(3,minmax(0,170px));gap:8px;margin:0 0 10px}
 .client-status-strip button{display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 14px;border:1px solid var(--nv-line);border-radius:13px;background:#fff;color:var(--nv-muted);font-size:.72rem;font-weight:800}
