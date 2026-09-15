@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./nexa-responsive.css";
+import "./stitch-ui.css";
 
 export const metadata: Metadata = {
   title: "NEXA GROUP | Gestión comercial",

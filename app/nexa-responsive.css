@@ -305,7 +305,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .stitch-sidebar-menu section.current>.sidebar-primary-item{background:#e66d00!important;color:#fff!important;box-shadow:none!important}
 .stitch-sidebar-menu section.current>.sidebar-primary-item i{color:#fff!important}
 .stitch-sidebar-menu .menu-group-items{margin-left:22px;padding-left:10px;border-left:1px solid #dce3ec}
-.stitch-sidebar-menu section.open .menu-group-items{max-height:180px}
+.stitch-sidebar-menu section.open .menu-group-items{max-height:none}
 .stitch-sidebar-menu .menu-group-items button{min-height:36px!important;padding:5px 9px!important;color:#526077!important;background:transparent!important}
 .mobile-brand{display:none}.page-identity{min-width:0}
 .client-status-strip{display:grid;grid-template-columns:repeat(3,minmax(0,170px));gap:8px;margin:0 0 10px}

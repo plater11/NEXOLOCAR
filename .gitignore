@@ -1,4 +1,6 @@
 node_modules/
+.pnpm-store/
+artifacts/stitch-qa/
 .next/
 .vercel/
 dist/
