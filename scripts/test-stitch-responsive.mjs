@@ -24,22 +24,23 @@ for (const width of [390,768,1440]) {
   if(url.pathname!=='/api/qaso')return route.continue();
   const {fn,args}=route.request().postDataJSON();requests.push(fn);
   if(fn === 'registrarMovimiento')movements.push(args[0]);
+  if(fn === 'obtenerPreparacionPedido')return route.fulfill({json:{ok:true,resultado:{lineas:[{codigo:'QA0',producto:products[0].nombre,cantidadPedido:2,precio:15,subtotal:30,presentacion:'Paquete',factorPresentacion:10,cantidadPreparada:0,estadoLinea:'PENDIENTE'}]}}});
   const values={obtenerSesion:session,obtenerClientes:clients,obtenerCatalogoProductos:products,obtenerEmisiones:orders,obtenerCobranzaPedidos:orders,obtenerActividadReciente:[],obtenerResumen:{totalClientes:1,totalProductos:12,valorTotalInventario:12000,periodo:{periodo:day.slice(0,7)+'-01',estado:'ABIERTO'}},obtenerPlaneamientoMensual:plan,obtenerContabilidadDiaria:{},obtenerCurvaS:{},obtenerResumenFinanciero:{cobrado:0,gastos:0,ventas:0,porCobrar:90,cobrosPorDia:{},gastosPorDia:{}},obtenerRendicionDia:{declarado:{},validacion:null},obtenerResumenJornada:{gastos:{total:0},cobros:{},saldos:{}},obtenerUsuarios:[{usuario:'qa',nombre:'Prueba Visual',perfil:'MASTER',estado:'ACTIVO',permisos:['configuracion']} ]};
   return route.fulfill({json:{ok:true,resultado:['registrarGastoOperacion','registrarMovimiento'].includes(fn) ? 'Registrado correctamente' : values[fn] ?? []}});
  });
  await page.goto('http://localhost:3100');
  await page.getByText('Hola, Prueba',{exact:true}).waitFor({timeout:90000});
+ await page.waitForLoadState('networkidle');
  async function shot(name) {
   const overflow=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
   if(overflow.scroll>width+1)errors.push({width,screen:name,overflow});
-  await page.screenshot({path:`artifacts/stitch-qa/${name}-${width}.png`,fullPage:true});
+  await page.screenshot({path:`artifacts/stitch-qa/${name}-${width}.png`,fullPage:!['carrito','detalle-pedido'].includes(name)});
  }
  await shot('inicio');
- for(const [label,child,selector] of [['Clientes',null,'.sx-directory'],['Preventa','Nueva preventa','.sx-catalogue'],['Pedidos','Por comprar','.sx-order-grid'],['Inventario','Existencias','.sx-stock-grid'],['Inventario','Nuevo ingreso','.sx-stock-entry'],['Gestión financiera','Cuentas por cobrar','.sx-hero-green'],['Gestión financiera','Análisis de ventas','.sx-split'],['Gestión financiera','Reporte de caja','.sx-metrics'],['Administración','Usuarios','.sx-admin-users'],['Administración','Mantenimiento','.sx-layout'],['Rendiciones','Nueva rendición','.sx-expense-fields']]) {
+ for(const [label,child,selector] of [['Clientes',null,'.sx-directory'],['Preventa','Nueva preventa','.sx-catalogue'],['Pedidos','Por comprar','.sx-order-grid'],['Inventario','Existencias','.sx-stock-grid'],['Inventario','Nuevo ingreso','.sx-stock-entry'],['Gestión financiera','Cuentas por cobrar','.sx-hero-green'],['Gestión financiera','Análisis de ventas','.sx-split'],['Gestión financiera','Reporte de caja','.sx-metrics'],['Reportes',null,'.sx-material-report'],['Administración','Usuarios','.sx-admin-users'],['Administración','Mantenimiento','.sx-layout'],['Rendiciones','Nueva rendición','.sx-expense-fields']]) {
   const menu=page.getByRole('button',{name:'Abrir menú',exact:true});
   if(await menu.isVisible())await menu.click();
   const nav=page.locator('.stitch-sidebar-menu');
-  const target=nav.locator('.sidebar-primary-item').filter({has:page.locator('b').getByText(label,{exact:true})});
   const primary=nav.locator('.sidebar-primary-item').filter({hasText:label});
   if(!child || await primary.getAttribute('aria-expanded') !== 'true')await primary.click();
   if(child)await nav.locator('.menu-group-items button').filter({hasText:child}).click();
@@ -47,6 +48,37 @@ for (const width of [390,768,1440]) {
   await page.waitForTimeout(250);
   await shot((child || label).replaceAll(' ','-'));
   console.log(JSON.stringify({width,screen:child || label,passed:true}));
+  if(label === 'Reportes') {
+    await page.locator('.sx-report-filters select').selectOption('Limpieza');
+    const materialRows=page.locator('.sx-material-ranking article');
+    if(await materialRows.count() !== 6)throw new Error('Family filter did not apply');
+    await page.getByRole('button',{name:'Por reponer',exact:true}).click();
+    if(await materialRows.count() !== 0)throw new Error('Replenishment filter incorrect');
+    await page.getByRole('button',{name:'Código',exact:true}).click();
+    const downloaded=page.waitForEvent('download');
+    await page.getByRole('button',{name:'↓ Excel',exact:true}).click();
+    const download=await downloaded;
+    if(!download.suggestedFilename().endsWith('.xlsx'))throw new Error('Material export missing');
+  }
+  if(child === 'Nueva preventa') {
+    await page.getByRole('textbox',{name:'Buscar cliente',exact:true}).fill('Cliente');
+    await page.locator('.sx-client-options button').first().click();
+    await page.getByRole('button',{name:'Agregar Producto mayorista 1 paquete x10',exact:true}).click();
+    await page.locator('.sx-cart-launch').click();
+    const cart=page.getByRole('dialog',{name:'Carrito de preventa'});
+    await cart.getByRole('spinbutton',{name:'Cantidad de Producto mayorista 1 paquete x10',exact:true}).fill('2');
+    if(!(await cart.locator('.sx-cart-total').innerText()).includes('30.00'))throw new Error('Wrong cart total');
+    await shot('carrito');
+    await page.keyboard.press('Escape');
+    await cart.waitFor({state:'hidden'});
+  }
+  if(child === 'Por comprar') {
+    await page.getByRole('button',{name:'QA-PEDIDO-0',exact:true}).click();
+    await page.getByRole('dialog',{name:'Detalle y estado del pedido'}).waitFor();
+    await page.getByRole('spinbutton',{name:'Preparado de Producto mayorista 1 paquete x10',exact:true}).waitFor();
+    await shot('detalle-pedido');
+    await page.getByRole('button',{name:'Cerrar detalle del pedido',exact:true}).click();
+  }
   if(child === 'Nuevo ingreso') {
     await page.getByRole('button',{name:'Producto mayorista 1 paquete x10 QA0',exact:true}).click();
     await page.getByLabel('Cantidad de presentaciones').fill('63');
