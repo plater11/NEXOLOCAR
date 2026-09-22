@@ -13,7 +13,7 @@ const plan = {filas:[{categoria:'Combustible',concepto:'Combustible',tipo:'GASTO
 const errors=[]; const requests=[]; const movements=[];
 await mkdir('artifacts/stitch-qa',{recursive:true});
 for (const width of [390,768,1440]) {
- const context=await browser.newContext({viewport:{width,height:900},timezoneId:'America/Lima'});
+ const context=await browser.newContext({viewport:{width,height:900},timezoneId:'America/Lima',reducedMotion:'reduce'});
  await context.addInitScript(s=>localStorage.setItem('nexoventa_session',JSON.stringify(s)),session);
  const page=await context.newPage();
  page.on('pageerror',e=>errors.push({width,message:e.message}));
@@ -24,11 +24,12 @@ for (const width of [390,768,1440]) {
   if(url.pathname!=='/api/qaso')return route.continue();
   const {fn,args}=route.request().postDataJSON();requests.push(fn);
   if(fn === 'registrarMovimiento')movements.push(args[0]);
+  if(fn === 'validarCargaMasivaInventario')return route.fulfill({json:{ok:true,resultado:{ok:true,filas:[{codigo:'QA0',producto:products[0].nombre,presentacion:'Paquete',factor:10,stockActual:10,cantidad:63,stockNuevo:73,costoActual:100,nuevoCosto:null}],errores:[],resumen:{productos:1,filas:1,cantidadPresentaciones:63,valorEstimado:6300}}}});
   if(fn === 'obtenerPreparacionPedido')return route.fulfill({json:{ok:true,resultado:{lineas:[{codigo:'QA0',producto:products[0].nombre,cantidadPedido:2,precio:15,subtotal:30,presentacion:'Paquete',factorPresentacion:10,cantidadPreparada:0,estadoLinea:'PENDIENTE'}]}}});
   const values={obtenerSesion:session,obtenerClientes:clients,obtenerCatalogoProductos:products,obtenerEmisiones:orders,obtenerCobranzaPedidos:orders,obtenerActividadReciente:[],obtenerResumen:{totalClientes:1,totalProductos:12,valorTotalInventario:12000,periodo:{periodo:day.slice(0,7)+'-01',estado:'ABIERTO'}},obtenerPlaneamientoMensual:plan,obtenerContabilidadDiaria:{},obtenerCurvaS:{},obtenerResumenFinanciero:{cobrado:0,gastos:0,ventas:0,porCobrar:90,cobrosPorDia:{},gastosPorDia:{}},obtenerRendicionDia:{declarado:{},validacion:null},obtenerResumenJornada:{gastos:{total:0},cobros:{},saldos:{}},obtenerUsuarios:[{usuario:'qa',nombre:'Prueba Visual',perfil:'MASTER',estado:'ACTIVO',permisos:['configuracion']} ]};
   return route.fulfill({json:{ok:true,resultado:['registrarGastoOperacion','registrarMovimiento'].includes(fn) ? 'Registrado correctamente' : values[fn] ?? []}});
  });
- await page.goto('http://localhost:3100');
+ await page.goto(process.env.TEST_BASE_URL || 'http://localhost:3100');
  await page.getByText('Hola, Prueba',{exact:true}).waitFor({timeout:90000});
  await page.waitForLoadState('networkidle');
  async function shot(name) {
@@ -37,6 +38,22 @@ for (const width of [390,768,1440]) {
   await page.screenshot({path:`artifacts/stitch-qa/${name}-${width}.png`,fullPage:!['carrito','detalle-pedido'].includes(name)});
  }
  await shot('inicio');
+ const drawer=page.locator('#nexa-navigation');
+ const menuTrigger=page.getByRole('button',{name:'Abrir menú',exact:true});
+ if(width<=900){
+   if(await drawer.isVisible())throw new Error('Closed mobile drawer remains visible');
+   await menuTrigger.click();
+   await page.getByRole('dialog',{name:'Navegación principal'}).waitFor();
+   if(!await page.locator('.workspace').evaluate(el=>el.inert))throw new Error('Drawer does not isolate background');
+   await page.getByRole('button',{name:'Cerrar sesión',exact:true}).focus();
+   await page.keyboard.press('Tab');
+   if(!await page.getByRole('button',{name:'Cerrar menú',exact:true}).evaluate(el=>el===document.activeElement))throw new Error('Focus escaped drawer');
+   await shot('menu-lateral');
+   await page.keyboard.press('Escape');
+   await drawer.waitFor({state:'hidden'});
+   if(!await menuTrigger.evaluate(el=>el===document.activeElement))throw new Error('Menu focus not restored');
+ } else if(!await drawer.isVisible())throw new Error('Desktop navigation is hidden');
+ if(await page.locator('.menu-group-items:not([hidden])').count())throw new Error('Submenus should start collapsed');
  for(const [label,child,selector] of [['Clientes',null,'.sx-directory'],['Preventa','Nueva preventa','.sx-catalogue'],['Pedidos','Por comprar','.sx-order-grid'],['Inventario','Existencias','.sx-stock-grid'],['Inventario','Nuevo ingreso','.sx-stock-entry'],['Gestión financiera','Cuentas por cobrar','.sx-hero-green'],['Gestión financiera','Análisis de ventas','.sx-split'],['Gestión financiera','Reporte de caja','.sx-metrics'],['Reportes',null,'.sx-material-report'],['Administración','Usuarios','.sx-admin-users'],['Administración','Mantenimiento','.sx-layout'],['Rendiciones','Nueva rendición','.sx-expense-fields']]) {
   const menu=page.getByRole('button',{name:'Abrir menú',exact:true});
   if(await menu.isVisible())await menu.click();
@@ -87,6 +104,17 @@ for (const width of [390,768,1440]) {
     await page.locator('.sx-stock-grid').waitFor();
     const movement=movements.at(-1);
     if(movement.cantidad !== 63 || movement.factor !== 10 || !movement.solicitudId)throw new Error('Incorrect wholesale stock payload');
+    await page.getByLabel('Vista de inventario').selectOption('Carga masiva');
+    const bulk=page.locator('.sx-bulk-stock');
+    const confirm=bulk.getByRole('button',{name:/Confirmar ingreso/});
+    if(await confirm.isEnabled())throw new Error('Bulk import enabled before validation');
+    await bulk.getByLabel('Archivo de ingreso de stock').setInputFiles({name:'stock.csv',mimeType:'text/csv',buffer:Buffer.from('Código,Presentación,Cantidad a ingresar\nQA0,Paquete,63')});
+    await bulk.locator('.sx-bulk-preview article').waitFor();
+    if(!await confirm.isEnabled())throw new Error('Validated file not available for confirmation');
+    await shot('carga-masiva');
+    await bulk.getByRole('button',{name:'Descartar archivo',exact:true}).click();
+    if(await bulk.locator('.sx-bulk-preview article').count() || await confirm.isEnabled())throw new Error('Discard did not clear preview');
+    if(requests.includes('importarCargaMasivaInventario'))throw new Error('Preview/discard wrote stock');
   }
   if(child === 'Nueva rendición') {
     await page.locator('#expense-amount').fill('120');

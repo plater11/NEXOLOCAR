@@ -1,0 +1,27 @@
+/* Phase 1 only: shell and navigation, never domain forms or data. */
+.phase-one-sidebar{min-height:0;display:flex;flex-direction:column;background:#fff;color:#111c2d}
+.phase-one-sidebar .brand{flex-shrink:0}
+.phase-one-sidebar .stitch-sidebar-menu{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.phase-one-sidebar .menu-group-items[hidden]{display:none!important}
+.phase-one-sidebar .sidebar-primary-item span{display:grid;place-items:center}
+.phase-one-sidebar .sidebar-primary-item b{font-size:13px;font-weight:600}
+.phase-one-sidebar .menu-group-items button{min-height:40px!important}
+.phase-one-sidebar .menu-group-items button b{font-size:12px;font-weight:500}
+.phase-one-sidebar .profile{flex-shrink:0;min-width:0}
+.phase-one-sidebar .profile>div{min-width:0;flex:1}
+.phase-one-sidebar .profile b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phase-one-sidebar button:focus-visible,.mobile-menu-trigger:focus-visible{outline:2px solid #be5600;outline-offset:2px}
+.stitch-appbar .page-identity h1{overflow-wrap:anywhere}
+.sidebar-backdrop:not(.show){visibility:hidden}
+@media(max-width:900px){
+ .phase-one-sidebar:not(.mobile-open){visibility:hidden}
+ .phase-one-sidebar.mobile-open{visibility:visible}
+ .phase-one-sidebar .brand{padding-top:max(14px,env(safe-area-inset-top));min-height:86px}
+ .phase-one-sidebar .brand strong{font-size:16px}
+ .phase-one-sidebar .brand small{font-size:8px;line-height:1.5}
+ .phase-one-sidebar .stitch-sidebar-menu{gap:3px!important}
+ .phase-one-sidebar .sidebar-primary-item{min-height:44px!important}
+ .phase-one-sidebar .profile{margin-bottom:max(12px,env(safe-area-inset-bottom))}
+ .stitch-appbar .page-identity h1{line-height:1.2}
+}
+@media(prefers-reduced-motion:reduce){.phase-one-sidebar,.sidebar-backdrop,.phase-one-sidebar .menu-group-items{transition:none!important}}

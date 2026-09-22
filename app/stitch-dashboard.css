@@ -1,0 +1,52 @@
+/* Dashboard structure from Stitch; no financial or order calculations here. */
+.sx-dashboard { gap: 16px; }
+.sx-dashboard-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.sx-dashboard-toolbar .sx-chips { flex:1; min-width:0; }
+.sx-dashboard .sx-birthday-trigger { display:flex; align-items:center; gap:6px; min-height:40px; padding:8px 12px; border:1px solid #fed7aa; border-radius:10px; background:#fff7ed; color:#974300; font-size:12px; cursor:pointer; }
+.sx-dashboard .sx-metric { text-align:left; padding:16px; border-radius:12px; box-shadow:0 2px 8px #111c2d06; }
+.sx-dashboard .sx-metric>span { font-size:11px; text-transform:uppercase; letter-spacing:.03em; }
+.sx-dashboard .sx-metric>strong { font-size:25px; line-height:1.25; }
+.sx-dashboard .sx-mini-metrics { gap:8px; }
+.sx-dashboard .sx-mini-metrics>button { padding:10px 12px; gap:4px; min-width:0; text-align:left; }
+.sx-dashboard .sx-mini-metrics>button span { font-size:11px; }
+.sx-dashboard .sx-mini-metrics>button b { font-size:15px; overflow-wrap:anywhere; }
+.sx-dashboard .sx-panel { padding:16px; }
+.sx-dashboard .sx-panel .sx-heading h2 { font-size:16px; }
+.sx-dashboard .sx-panel .sx-icon { width:32px; height:32px; border-radius:9px; }
+.sx-dashboard .sx-operation-strip { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; overflow:visible; margin-top:14px; }
+.sx-dashboard .sx-operation-strip>button { min-width:0; padding:12px 8px; text-align:left; border-radius:10px; }
+.sx-dashboard .sx-operation-strip span { font-size:10px; line-height:1.4; white-space:normal; }
+.sx-dashboard .sx-operation-strip b { font-size:23px; }
+.sx-dashboard .sx-operation-strip small { font-size:11px; overflow-wrap:anywhere; }
+.sx-dashboard-history .sx-lines { margin-top:12px; }
+.sx-dashboard-history .sx-lines>button { display:flex; align-items:center; gap:10px; padding:14px 0; text-align:left; }
+.sx-dashboard-history .sx-history-icon { flex:0 0 34px; height:34px; display:grid; place-items:center; border-radius:50%; background:#fff7ed; color:#be5600; }
+.sx-dashboard-history .sx-history-description { flex:1; min-width:0; }
+.sx-dashboard-history .sx-history-description b { font-size:12px; }
+.sx-dashboard-history .sx-history-description small { font-size:11px; overflow-wrap:anywhere; }
+.sx-dashboard-history .sx-history-amount { flex:0 1 auto; max-width:35%; align-items:flex-end; text-align:right; }
+.sx-dashboard-history .sx-history-amount strong { font-size:13px; white-space:nowrap; }
+.sx-dashboard-history .sx-history-amount .sx-badge { font-size:9px; }
+.sx-dashboard button:focus-visible { outline:3px solid #2170e4; outline-offset:3px; }
+@media(max-width:600px) {
+  .sx-dashboard { gap:12px; }
+  .sx-dashboard>.sx-heading { flex-wrap:wrap; gap:8px; }
+  .sx-dashboard>.sx-heading h2 { font-size:21px; }
+  .sx-dashboard>.sx-heading .sx-actions { margin-left:auto; }
+  .sx-dashboard-toolbar { gap:8px; }
+  .sx-dashboard-toolbar .sx-chips { flex-basis:100%; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; overflow:visible; }
+  .sx-dashboard-toolbar .sx-chips button { padding:6px 3px; font-size:11px; min-height:40px; border-radius:9px; }
+  .sx-dashboard .sx-birthday-trigger { margin-left:auto; min-height:36px; }
+  .sx-dashboard .sx-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .sx-dashboard .sx-metric { padding:12px; }
+  .sx-dashboard .sx-metric>span { font-size:10px; }
+  .sx-dashboard .sx-metric>strong { font-size:21px; }
+  .sx-dashboard .sx-mini-metrics>button { padding:9px 7px; }
+  .sx-dashboard .sx-mini-metrics>button b { font-size:13px; }
+  .sx-dashboard .sx-panel { padding:12px; }
+  .sx-dashboard .sx-operation-strip { grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+  .sx-dashboard .sx-operation-strip>button { padding:10px 7px; }
+  .sx-dashboard .sx-operation-strip b { font-size:21px; }
+  .sx-dashboard-history .sx-history-icon { display:none; }
+  .sx-dashboard-history .sx-lines>button { gap:8px; }
+}

@@ -1,4 +1,11 @@
-# Punto de continuación — 17 de septiembre de 2026
+# Punto de continuación — 22 de septiembre de 2026
+
+## Avance más reciente
+- Fase 1: navegación extraída, panel móvil accesible y submenús. Compilación y recorridos a 390/768/1440 px.
+- Fase 2: Inicio separa resumen de pedidos e historial; indicadores compactos y períodos accesibles. Conserva cálculos.
+- Fase 3: carga Excel conectada a StitchBulkStock con las funciones existentes. Tres pasos, revisión y descarte. Sin modificar backend ni integrar lib/stock-import.ts.
+- Suite ampliada con carga CSV, vista previa de 63 paquetes y descarte sin llamada de importación.
+- Conteo físico y el resto de pendientes de abajo NO se consideran terminados.
 
 ## Pedido del usuario
 Continuar la reconstrucción completa con las referencias Stitch, mantener backend/datos y guardar un punto de reanudación. No afirmar que las 31 pantallas están terminadas.
