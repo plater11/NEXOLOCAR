@@ -58,12 +58,7 @@ html:has(.sx-sales){scrollbar-gutter:stable}
 .sx-expense-submit{width:100%;min-height:48px}
 .sx-rendition-screen{width:100%;min-width:0;padding-bottom:20px}
 .sx-rendition-jornada{min-height:36px;margin:4px 0 14px;padding:0 14px;border:0;border-radius:999px;background:#17263f;color:#fff;font-size:11px;font-weight:800;letter-spacing:.05em}
-.sx-rendition-title{display:flex;align-items:center;gap:12px;width:min(100%,900px);margin:0 auto 14px;min-width:0}
-.sx-rendition-icon{display:grid;place-items:center;flex:none;width:42px;height:42px;border-radius:12px;background:#fff0e4;color:#be5600}
-.sx-rendition-title>div:nth-child(2){min-width:0;flex:1}
-.sx-rendition-title small{color:#be5600;font-size:10px;font-weight:800;letter-spacing:.14em}
-.sx-rendition-title h2{margin:3px 0;font-size:22px;font-weight:600;color:#17263f}
-.sx-rendition-title p{margin:0;color:#64748b;font-size:12px}
+.sx-expense-no-categories{margin:8px 0 0;padding:10px;border-radius:8px;background:#fff5e5;color:#92520a;font-size:12px;line-height:1.45}
 .sx-expense-block-title{margin:0 0 2px;color:#17263f;font-size:14px}
 .sx-receipt-upload{display:grid;gap:10px;padding:12px;border:1px dashed #cbd5e1;border-radius:11px;background:#f8fafc}
 .sx-receipt-upload>div:first-child{display:grid;gap:3px;color:#17263f;font-size:13px}
@@ -103,4 +98,5 @@ html:has(.sx-sales){scrollbar-gutter:stable}
 .sx-sales-evolution>footer i{display:inline-block;width:15px;height:4px;border-radius:9px;background:#8b42d7}
 .sx-sales-evolution>footer .sx-chart-documents-key{width:13px;height:13px;border-radius:2px;background:#94a3b8}
 .sx-sales-evolution>footer small{flex-basis:100%;text-align:center;font-size:10px}
-@media(max-width:600px){.sx-sales{padding-bottom:calc(96px + env(safe-area-inset-bottom))}.sx-sales-header .sx-heading{align-items:flex-start}.sx-sales-tabs{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.sx-sales-tabs button{min-width:0;white-space:normal;line-height:1.25}.sx-sales-tools{width:100%;justify-content:space-between}.sx-draft-list{grid-template-columns:minmax(0,1fr);gap:10px}.sx-draft-list article{padding:14px}.sx-expense-amount-row{grid-template-columns:minmax(0,1fr);gap:8px}.sx-expense-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}.sx-expense-quick button{min-width:0;padding:0 4px}.sx-expense-category .sx-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sx-expense-status{font-size:10px;padding-inline:7px}.sx-rendition-title{align-items:flex-start;gap:9px}.sx-rendition-title h2{font-size:19px}.sx-rendition-icon{width:38px;height:38px}.sx-expense-actions{grid-template-columns:minmax(0,1fr)}.sx-expense-actions .sx-expense-submit{grid-row:1}.sx-sales-evolution{padding:14px}.sx-sales-evolution>header{align-items:flex-start}.sx-sales-evolution>header h3{font-size:15px}.sx-chart-period{font-size:9px;padding:6px 8px}.sx-sales-chart{min-width:500px}}
+@media(max-width:600px){.sx-sales{padding-bottom:calc(96px + env(safe-area-inset-bottom))}.sx-sales-header .sx-heading{align-items:flex-start}.sx-sales-tabs{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.sx-sales-tabs button{min-width:0;white-space:normal;line-height:1.25}.sx-sales-tools{width:100%;justify-content:space-between}.sx-draft-list{grid-template-columns:minmax(0,1fr);gap:10px}.sx-draft-list article{padding:14px}.sx-expense-amount-row{grid-template-columns:minmax(0,1fr);gap:8px}.sx-expense-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}.sx-expense-quick button{min-width:0;padding:0 4px}.sx-expense-category .sx-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sx-expense-status{font-size:10px;padding-inline:7px}.sx-expense-actions{grid-template-columns:minmax(0,1fr)}.sx-expense-actions .sx-expense-submit{grid-row:1}.sx-sales-evolution{padding:14px}.sx-sales-evolution>header{align-items:flex-start}.sx-sales-evolution>header h3{font-size:15px}.sx-chart-period{font-size:9px;padding:6px 8px}.sx-sales-chart{min-width:500px}}
+@media(max-width:900px){.app-shell:has(.sx-rendition-screen) .page-identity h1{font-size:0}.app-shell:has(.sx-rendition-screen) .page-identity h1::after{content:"Rendición";font-size:16px}}

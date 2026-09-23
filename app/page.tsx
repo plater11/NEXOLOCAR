@@ -1451,7 +1451,7 @@ function WeeklyRendition({ call, notify, onRegisterExpense, onClose, onBudgetCat
     notify: (s: string) => void;
     onRegisterExpense: () => void;
     onClose: () => void;
-    onBudgetCategories: (values: string[]) => void;
+    onBudgetCategories: (values: string[], loaded?: boolean) => void;
     refreshKey: number;
 }) {
     const [anchor, setAnchor] = useState(today());
@@ -1468,13 +1468,25 @@ function WeeklyRendition({ call, notify, onRegisterExpense, onClose, onBudgetCat
     const loadWeek = useCallback(async () => {
         if (!Number.isFinite(refreshKey)) return;
         setBusy(true);
+        onBudgetCategories([], false);
         try {
-            const [budget, ...dailyExpenses] = await Promise.all([call<PlanData>("obtenerPlaneamientoMensual", [period]), ...weekDates.map(date => call<ExpenseApproval[]>("obtenerGastosOperacion", [date]))]);
-            const budgetData = budget as PlanData;
+            const budgetData = await call<PlanData>("obtenerPlaneamientoMensual", [period]);
             setPlan(budgetData);
-            setExpenses((dailyExpenses as ExpenseApproval[][]).flat().filter((row, index, all) => all.findIndex(item => item.solicitudId === row.solicitudId) === index));
-            onBudgetCategories(budgetData.filas.filter(row => !String(row.tipo).includes("INGRESO") && row.activo !== false).map(row => String(row.concepto || row.categoria)).filter(Boolean));
-        } catch (error) { notify(error instanceof Error ? error.message : "No se pudo cargar la rendición semanal"); }
+            const rows = Array.isArray(budgetData?.filas) ? budgetData.filas : [];
+            const categories = rows.filter(row => !String(row.tipo || "").toUpperCase().includes("INGRESO") && row.activo !== false).map(row => String(row.concepto || row.categoria || "").trim()).filter(Boolean);
+            onBudgetCategories([...new Set(categories)]);
+        } catch (error) {
+            setPlan(null);
+            onBudgetCategories([]);
+            notify(error instanceof Error ? `No se pudo cargar el presupuesto: ${error.message}` : "No se pudo cargar el presupuesto mensual.");
+        }
+        try {
+            const dailyExpenses = await Promise.allSettled(weekDates.map(date => call<ExpenseApproval[]>("obtenerGastosOperacion", [date])));
+            const failed = dailyExpenses.find(result => result.status === "rejected");
+            const entries = dailyExpenses.filter((result): result is PromiseFulfilledResult<ExpenseApproval[]> => result.status === "fulfilled").flatMap(result => Array.isArray(result.value) ? result.value : []);
+            setExpenses(entries.filter((row, index, all) => all.findIndex(item => item.solicitudId === row.solicitudId) === index));
+            if (failed?.status === "rejected") notify("Presupuesto cargado; no se pudieron actualizar algunos gastos recientes.");
+        } catch (error) { notify(error instanceof Error ? error.message : "No se pudieron cargar los gastos de la semana."); }
         finally { setBusy(false); }
     }, [call, notify, onBudgetCategories, period, refreshKey, weekDates]);
     useEffect(() => { queueMicrotask(() => void loadWeek()); }, [loadWeek]);
@@ -1526,6 +1538,7 @@ function Collections({ rows, clients, loading, load, call, notify, canUploadRece
     const [journey, setJourney] = useState<JourneySummary | null>(null);
     const [journeyExpenses, setJourneyExpenses] = useState<ExpenseApproval[]>([]);
     const [budgetCategories, setBudgetCategories] = useState<string[]>([]);
+    const [budgetCategoriesLoading, setBudgetCategoriesLoading] = useState(true);
     const [journeyDetail, setJourneyDetail] = useState<"ASIGNADOS" | "ENTREGADOS" | "NO ENTREGADOS" | "VENTAS" | "COBRADO" | "POR COBRAR" | "URGENTE" | "GASTOS" | "GASTOS PENDIENTES" | null>(null);
     const [closeJourneyOpen, setCloseJourneyOpen] = useState(false);
     const [closingJourney, setClosingJourney] = useState(false);
@@ -1533,8 +1546,9 @@ function Collections({ rows, clients, loading, load, call, notify, canUploadRece
     const [journeyObservation, setJourneyObservation] = useState("");
     const [expense, setExpense] = useState(() => cacheGet(`nexo_rendition_expense_draft:${cacheGet<Session | null>("nexoventa_session", null)?.usuario || "local"}`, { solicitudId: crypto.randomUUID(), fecha: today(), partida: "COMBUSTIBLE", descripcion: "", importe: 0, canal: "EFECTIVO", ruta: "JORNADA ACTUAL", unidad: "", observacion: "", origenDinero: "FONDO DE RUTA", proveedor: "", tipoComprobante: "TICKET" }));
     const [receiptFile, setReceiptFile] = useState<File | null>(null);
-    const acceptBudgetCategories = useCallback((values: string[]) => {
+    const acceptBudgetCategories = useCallback((values: string[], loaded = true) => {
         setBudgetCategories(values);
+        setBudgetCategoriesLoading(!loaded);
         if (values.length) setExpense(current => values.includes(current.partida) ? current : { ...current, partida: values[0] });
     }, []);
     const [rawSelected, setSelected] = useState<Order | null>(null);
@@ -1702,7 +1716,7 @@ function Collections({ rows, clients, loading, load, call, notify, canUploadRece
         <Heading eyebrow="RENDICIÓN" title="Rendición" text="Registra gastos y viáticos de la jornada. El presupuesto proviene de Gestión financiera."/>
         <nav className="route-tabs">{["EN RUTA", "ENTREGADOS", "PENDIENTES DE COBRO", "COBRANZA URGENTE", "JORNADA Y RENDICIÓN"].map(tab => <button className={routeTab === tab ? "active" : ""} key={tab} onClick={() => { setRouteTab(tab); cacheSet("nexo_route_tab", tab); }}>{tab}<b>{tab === "EN RUTA" ? routeRows.length : tab === "ENTREGADOS" ? deliveredRows.length : tab === "PENDIENTES DE COBRO" ? pendingRows.length : tab === "COBRANZA URGENTE" ? overdueRows.length : ""}</b></button>)}</nav>
         <div hidden={expenseOpen}><WeeklyRendition call={call} notify={notify} onRegisterExpense={() => { cacheSet("nexo_rendition_view", "NUEVA_RENDICION"); setExpenseOpen(true); }} onClose={() => setCloseJourneyOpen(true)} onBudgetCategories={acceptBudgetCategories} refreshKey={expenseRefresh}/></div>
-        {expenseOpen && <div className="sx-rendition-screen"><button className="sx-rendition-jornada" type="button" onClick={() => { cacheSet("nexo_rendition_view", "RESUMEN"); setExpenseOpen(false); }}>JORNADA</button><StitchExpense value={expense} onChange={setExpense} categories={budgetCategories} saving={savingExpense} onSubmit={saveExpense} canUploadReceipt={canUploadReceipt} receiptFile={receiptFile} onReceiptChange={setReceiptFile} recent={journeyExpenses.slice(0, 3)} onSaveDraft={() => { cacheSet(`nexo_rendition_expense_draft:${cacheGet<Session | null>("nexoventa_session", null)?.usuario || "local"}`, expense); cacheSet("nexo_rendition_view", "RESUMEN"); setExpenseOpen(false); notify("Borrador de rendición guardado en este dispositivo."); }} /></div>}
+        {expenseOpen && <div className="sx-rendition-screen"><button className="sx-rendition-jornada" type="button" onClick={() => { cacheSet("nexo_rendition_view", "RESUMEN"); setExpenseOpen(false); }}>JORNADA</button><StitchExpense value={expense} onChange={setExpense} categories={budgetCategories} categoriesLoading={budgetCategoriesLoading} saving={savingExpense} onSubmit={saveExpense} canUploadReceipt={canUploadReceipt} receiptFile={receiptFile} onReceiptChange={setReceiptFile} recent={journeyExpenses.slice(0, 3)} onSaveDraft={() => { cacheSet(`nexo_rendition_expense_draft:${cacheGet<Session | null>("nexoventa_session", null)?.usuario || "local"}`, expense); cacheSet("nexo_rendition_view", "RESUMEN"); setExpenseOpen(false); notify("Borrador de rendición guardado en este dispositivo."); }} /></div>}
         {closeJourneyOpen && <div className="modal-bg route-modal-bg" onMouseDown={event => { if (event.target === event.currentTarget && !closingJourney) setCloseJourneyOpen(false); }}><section className="journey-close-modal"><header><div><small>CIERRE OPERATIVO</small><h2>Cerrar jornada de hoy</h2></div><button onClick={() => setCloseJourneyOpen(false)}>×</button></header><div><span>Gastos registrados <b>{money(journey?.gastos.total)}</b></span><span>Efectivo esperado <b>{money(journey?.efectivoEsperado)}</b></span><label>Efectivo entregado<input type="number" min="0" step=".01" value={cashDelivered || ""} onChange={event => setCashDelivered(Number(event.target.value))}/></label><strong>Diferencia <b>{money(cashDifference)}</b></strong>{Math.abs(cashDifference) > .01 && <label>Observación requerida<textarea value={journeyObservation} onChange={event => setJourneyObservation(event.target.value)}/></label>}</div><footer><button onClick={() => setCloseJourneyOpen(false)}>Cancelar</button><button className="primary" disabled={closingJourney || (Math.abs(cashDifference) > .01 && !journeyObservation.trim())} onClick={closeJourney}>{closingJourney ? "Cerrando…" : "Confirmar cierre"}</button></footer></section></div>}
         {expenseSuccess && <div className="expense-success" role="dialog" aria-modal="true"><section><span>✓</span><small>GASTO REGISTRADO</small><h2>Registro exitoso</h2><strong>{money(expenseSuccess.importe)}</strong><p>{expenseSuccess.partida}</p><em>Pendiente de aprobación en Gestión financiera</em><button className="primary" onClick={() => setExpenseSuccess(null)}>Entendido</button></section></div>}
     </div>;
