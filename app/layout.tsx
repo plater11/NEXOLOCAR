@@ -5,6 +5,7 @@ import "./stitch-ui.css";
 import "./stitch-shell.css";
 import "./stitch-dashboard.css";
 import "./stitch-inventory.css";
+import "./stitch-sales.css";
 
 export const metadata: Metadata = {
   title: "NEXA GROUP | Gestión comercial",

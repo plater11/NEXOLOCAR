@@ -10,6 +10,7 @@ import "./sale-lock.css";
 import "./collections.css";
 import { StitchNavigation } from "./stitch-navigation";
 import { StitchCart } from "./stitch-cart";
+import { playCartBeep } from "../lib/cart-sound";
 import { StitchMaterialReport } from "./stitch-material-report";
 import { StitchMaintenance } from "./stitch-maintenance";
 import { StitchMovements } from "./stitch-movements";
@@ -180,7 +181,7 @@ type SidebarItem = { label: string; target: string; icon: string; children?: Sid
 const sidebarItems: SidebarItem[] = [
     { label: "Inicio", target: "Inicio", icon: "⌂" },
     { label: "Clientes", target: "Clientes", icon: "♙" },
-    { label: "Preventa", target: "Preventa", icon: "▧", children: [{ label: "Nueva preventa", value: "NUEVA" }, { label: "Carrito de pedido", value: "CARRITO" }] },
+    { label: "Preventa", target: "Preventa", icon: "▧", children: [{ label: "Preventa", value: "NUEVA" }, { label: "Borradores", value: "BORRADORES" }] },
     { label: "Pedidos", target: "Pedidos y emisión", icon: "🛒", children: [{ label: "Por comprar", value: "POR_COMPRAR" }, { label: "Listo para entrega", value: "LISTO_PARA_ENTREGA" }, { label: "En ruta", value: "EN_RUTA" }, { label: "Entregado", value: "ENTREGADO" }, { label: "Observado", value: "OBSERVADO" }, { label: "Cobranza", value: "COBRANZA" }] },
     { label: "Rendiciones", target: "Centro de rendiciones", icon: "▤", children: [{ label: "Resumen", value: "RESUMEN" }, { label: "Nueva rendición", value: "NUEVA_RENDICION" }] },
     { label: "Inventario", target: "Productos e inventario", icon: "♜", children: [{ label: "Existencias", value: "Inventario" }, { label: "Nuevo ingreso", value: "Ingresar stock" }, { label: "Actualizar stock", value: "Carga masiva" }, { label: "Movimientos", value: "Historial" }, { label: "Toma de inventario", value: "Editar" }] },
@@ -861,6 +862,17 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
     onNavigate: (label: string) => void;
 }) {
     const savingSaleRef = useRef(false);
+    type Draft = { id: string; cliente: string; items: SaleItem[]; observaciones: string; updatedAt: string; editingOrderId?: string };
+    const draftKey = `nexo_sale_drafts:${cacheGet<Session | null>("nexoventa_session", null)?.usuario || "local"}`;
+    const [drafts, setDrafts] = useState<Draft[]>(() => {
+        const saved = cacheGet<Draft[] | null>(draftKey, null);
+        if (saved) return saved;
+        const legacy = cacheGet<Omit<Draft, "id"> | null>("nexo_sale_draft", null);
+        return legacy?.items?.length ? [{ ...legacy, id: "legacy" }] : [];
+    });
+    const [draftId, setDraftId] = useState("");
+    const [salesView, setSalesView] = useState("NUEVA");
+    const [soundEnabled, setSoundEnabled] = useState(() => cacheGet("nexo_cart_sound", true));
     const clientPickerRef = useRef<HTMLDivElement>(null);
     const [client, setClient] = useState(""), [clientQuery, setClientQuery] = useState(""), [clientOpen, setClientOpen] = useState(false);
     const [query, setQuery] = useState(""), [cart, setCart] = useState<SaleItem[]>([]), [obs, setObs] = useState("");
@@ -914,8 +926,11 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         const info = presentation(p);
         if (p.stock < info.factor)
             return notify(`Stock insuficiente. Disponible: ${p.stock} ${info.detalleUnidad}.`);
+        const current = cart.find(item => item.codigo === p.codigo);
+        if (current && (current.cantidad + 1) * current.factor > p.stock) return notify("No hay más stock disponible");
         setCart(x => x.some(i => i.codigo === p.codigo) ? x.map(i => i.codigo === p.codigo ? (() => { const cantidadEntera = (i.cantidadEntera ?? Math.floor(i.cantidad)) + 1, fraccion = i.fraccion || 0, cantidad = cantidadEntera + fraccion, unidadesSueltas = cantidad * i.factor; if (unidadesSueltas > p.stock) { notify(`Stock insuficiente. Disponible: ${p.stock} ${info.detalleUnidad}.`); return i; } return { ...i, cantidadEntera, cantidad, unidadesSueltas }; })() : i) : [...x, { codigo: p.codigo, nombre: p.nombre, cantidad: 1, cantidadEntera: 1, precioVenta: info.precioPresentacion, unidad: p.unidad, factor: info.factor, unidadesSueltas: info.factor, detalleUnidad: info.detalleUnidad, stock: p.stock, nombrePresentacion: info.nombrePresentacion, fraccion: 0, fraccionActiva: false, permiteFraccionamiento: info.fractions.length > 0, fraccionesPermitidas: info.fractions.map(option => ({ label: option.label, value: option.value })) }]);
         navigator.vibrate?.(18);
+        if (soundEnabled) playCartBeep();
         setCartPulse(true);
         window.setTimeout(() => setCartPulse(false), 240);
     }
@@ -956,11 +971,25 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         setCart(rows => safeQuantity === 0 ? rows.filter(row => row.codigo !== item.codigo) : rows.map(row => row.codigo === item.codigo ? { ...row, unidadesSueltas: safeUnits, cantidad: safeQuantity, cantidadEntera } : row));
     }
     function saveDraft() {
-        cacheSet("nexo_sale_draft", { cliente: client, items: cart, observaciones: obs, updatedAt: new Date().toISOString() });
+        if (!cart.length) return notify("Agrega materiales antes de guardar un borrador.");
+        const id = draftId || crypto.randomUUID();
+        const updated = [{ id, cliente: client, items: cart, observaciones: obs, updatedAt: new Date().toISOString(), editingOrderId }, ...drafts.filter(draft => draft.id !== id)];
+        try { cacheSet(draftKey, updated); } catch { return notify("No se pudo guardar el borrador en este dispositivo."); }
+        setDrafts(updated); setDraftId("");
+        setCart([]); setClient(""); setClientQuery(""); setObs(""); setEditingOrderId("");
         notify("Borrador guardado en este dispositivo");
         setCartOpen(false);
+        setSalesView("BORRADORES");
     }
-    function clearCompletedSale() {
+    function resumeDraft(draft: Draft) {
+        if (cart.length && draftId !== draft.id && !window.confirm("¿Reemplazar el carrito actual con este borrador? Guarda antes cualquier cambio que quieras conservar.")) return;
+        setDraftId(draft.id); setClient(draft.cliente); setClientQuery(draft.cliente);
+        setCart(draft.items); setObs(draft.observaciones); setEditingOrderId(draft.editingOrderId || "");
+        setSalesView("NUEVA"); setCartOpen(false);
+    }
+    function clearCompletedSale(removeDraft = false) {
+        if (removeDraft && draftId) { const remaining = drafts.filter(draft => draft.id !== draftId); cacheSet(draftKey, remaining); setDrafts(remaining); }
+        setDraftId("");
         setCart([]);
         setClient("");
         setClientQuery("");
@@ -993,7 +1022,7 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         if (!online) {
             await enqueueOperation("registrarVenta", [payload], payload.solicitudId);
             setSuccess({ ventaId: `PENDIENTE-${payload.solicitudId.slice(0, 8).toUpperCase()}`, total, cliente: completedClient, fecha: completedAt.toLocaleString("es-PE"), offline: true });
-            clearCompletedSale();
+            clearCompletedSale(true);
             savingSaleRef.current = false;
             setSavingSale(false);
             return;
@@ -1003,7 +1032,7 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
                 const r = await measured("editarPedido", () => call<{ ok: boolean; mensaje: string; total?: number }>("corregirPedido", [{ ...payload, ventaId: editingOrderId }]));
                 if (!r.ok) throw new Error(r.mensaje);
                 const editedId = editingOrderId;
-                clearCompletedSale();
+                clearCompletedSale(true);
                 cacheSet("nexo_order_tab", "POR_COMPRAR");
                 cacheSet("nexo_order_date_v2", "15_DIAS");
                 notify(`Pedido ${editedId} actualizado y enviado a Por comprar.`);
@@ -1019,7 +1048,7 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
             if (!r.ok)
                 throw new Error(r.mensaje);
             setSuccess({ ventaId: r.ventaId || "Registrada", total, cliente: completedClient, fecha: completedAt.toLocaleString("es-PE"), offline: false });
-            clearCompletedSale();
+            clearCompletedSale(true);
             void refreshProducts();
         }
         catch (x) {
@@ -1031,7 +1060,7 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         }
     }
     const [cartOpen, setCartOpen] = useState(false);
-    useEffect(() => { setCartOpen(cacheGet<string>("nexo_sales_view", "NUEVA") === "CARRITO"); }, [navigationVersion]);
+    useEffect(() => { setSalesView(cacheGet<string>("nexo_sales_view", "NUEVA")); setCartOpen(false); }, [navigationVersion]);
     const cartUnits = Number(cart.reduce((total, item) => total + item.cantidad, 0).toFixed(2));
     const cartTotal = cart.reduce((total, item) => total + item.cantidad * item.precioVenta, 0);
     const activeFilters = Number(groupFilter !== "TODOS") + Number(stockFilter !== "TODOS") + Number(sortFilter !== "NOMBRE");
@@ -1043,12 +1072,16 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         setSuccess(null);
         onNavigate("Pedidos y emisión");
     }
+    const salesTabs = <nav className="sx-sales-tabs" aria-label="Secciones de preventa"><button aria-pressed={salesView !== "BORRADORES"} onClick={() => setSalesView("NUEVA")}>Preventa</button><button aria-pressed={salesView === "BORRADORES"} onClick={() => setSalesView("BORRADORES")}>Borradores ({drafts.length})</button></nav>;
+    if (salesView === "BORRADORES") return <div className="sx-layout sx-sales"><StitchHeader title="Borradores" subtitle="Preventas sin confirmar · guardadas en este dispositivo"/>{salesTabs}<section className="sx-draft-list">{drafts.map(draft => <article key={draft.id}><h3>{draft.cliente || "Cliente pendiente"}</h3><p>{draft.items.length} materiales · {new Date(draft.updatedAt).toLocaleString("es-PE")}</p><strong>{money(draft.items.reduce((sum, item) => sum + item.cantidad * item.precioVenta, 0))}</strong><button onClick={() => resumeDraft(draft)}>Continuar preventa</button></article>)}{!drafts.length && <p className="sx-empty">No tienes borradores guardados. Puedes guardar el pedido desde el carrito sin confirmarlo.</p>}</section></div>;
     return <div className="sx-layout sx-sales">
+        {salesTabs}
+        <button className="sx-sound-toggle" aria-pressed={soundEnabled} onClick={() => { setSoundEnabled(!soundEnabled); cacheSet("nexo_cart_sound", !soundEnabled); }}>Sonido: {soundEnabled ? "activado" : "desactivado"}</button>
         <StitchHeader title={editingOrderId ? "Editar preventa" : "Preventa"} subtitle={editingOrderId || "Catálogo y pedidos"}><button onClick={() => setFiltersOpen(true)}>Filtros {activeFilters || ""}</button>{editingOrderId && <button onClick={() => { clearCompletedSale(); onNavigate("Pedidos y emisión"); }}>Cancelar edición</button>}</StitchHeader>
         <section className="sx-client-picker sx-panel" ref={clientPickerRef}><label>Cliente</label>{selectedClient ? <div className="sx-selected-client"><b>{client}</b><small>{selectedClient.contacto} · {selectedClient.direccion}</small><button onClick={() => { setClient(""); setClientQuery(""); setClientOpen(true); }}>Cambiar</button></div> : <input aria-label="Buscar cliente" value={clientQuery} onFocus={() => setClientOpen(true)} onChange={e => { setClientQuery(e.target.value); setClient(""); setClientOpen(true); }} placeholder="Buscar nombre, teléfono o dirección"/>}{clientOpen && !selectedClient && <div className="sx-client-options">{clientMatches.map(c => <button key={c.id} onClick={() => chooseClient(c)}><b>{c.nombre} {c.apellidos}</b><small>{c.contacto} · {c.direccion}</small></button>)}{!clientMatches.length && <p>No se encontraron clientes.</p>}</div>}</section>
         <StitchSearch value={query} onChange={value => { setQuery(value); setRenderLimit(60); }} placeholder="Buscar producto o código"/>
         <nav className="sx-chips">{["TODOS",...groups].map(g => <button key={g} className={groupFilter === g ? "selected" : ""} onClick={() => { setGroupFilter(g); setRenderLimit(60); }}>{g === "TODOS" ? "Todas" : g}</button>)}</nav>
-        <section className="sx-catalogue">{renderedProducts.map(p => { const info = presentation(p), item = cart.find(i => i.codigo === p.codigo); return <article key={p.codigo}><button className="sx-product-main" onClick={() => add(p)} disabled={p.stock < info.factor}><span className="sx-product-placeholder" aria-hidden="true">{p.nombre.slice(0,2)}</span><small>{p.codigo}</small><b>{p.nombre}</b><small>{info.nombrePresentacion} {info.factor > 1 ? `x${info.factor}` : ""} · Stock {Number((p.stock/info.factor).toFixed(2))}</small><strong>{money(info.precioPresentacion)}</strong></button><div className="sx-stepper"><button aria-label={`Quitar uno de ${p.nombre}`} disabled={!item} onClick={() => item && changeUnits(item,-1)}>−</button><b>{item?.cantidad || 0}</b><button aria-label={`Agregar ${p.nombre}`} disabled={p.stock < info.factor} onClick={() => add(p)}>+</button></div></article>; })}</section>
+        <section className="sx-catalogue">{renderedProducts.map(p => { const info = presentation(p), item = cart.find(i => i.codigo === p.codigo); return <article key={p.codigo} onClick={event => { if (!(event.target as HTMLElement).closest("button")) add(p); }}><button className="sx-product-main" aria-label={`Seleccionar ${p.nombre}`} onClick={() => add(p)} disabled={p.stock < info.factor}><span className="sx-product-placeholder" aria-hidden="true">{p.nombre.slice(0,2)}</span><small>{p.codigo}</small><b>{p.nombre}</b><small>{info.nombrePresentacion} {info.factor > 1 ? `x${info.factor}` : ""} · Stock {Number((p.stock/info.factor).toFixed(2))}</small><strong>{money(info.precioPresentacion)}</strong></button><div className="sx-stepper"><button aria-label={`Quitar uno de ${p.nombre}`} disabled={!item} onClick={() => item && changeUnits(item,-1)}>−</button><b>{item?.cantidad || 0}</b><button aria-label={`Agregar ${p.nombre}`} disabled={p.stock < info.factor} onClick={() => add(p)}>+</button></div></article>; })}</section>
         {renderLimit < visible.length && <button onClick={() => setRenderLimit(n => n+60)}>Ver más productos</button>}{!visible.length && <p className="sx-empty">No se encontraron productos con estos filtros.</p>}
         <button className="sx-cart-launch" onClick={() => setCartOpen(true)}><span>{cartUnits} · Ver carrito</span><strong>{money(cartTotal)}</strong></button>
         {filtersOpen && <div className="modal-bg pos-sheet-bg" onClick={() => setFiltersOpen(false)}><section className="pos-filter-sheet" onClick={e => e.stopPropagation()}><header><div><small>PREVENTA</small><h2>Filtros de productos</h2></div><button onClick={() => setFiltersOpen(false)}>×</button></header><div className="filter-sheet-body"><label>Categoría<select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}><option value="TODOS">Todas las categorías</option>{groups.map(g => <option key={g}>{g}</option>)}</select></label><label>Disponibilidad<select value={stockFilter} onChange={e => setStockFilter(e.target.value)}><option value="TODOS">Todo el catálogo</option><option value="CON_STOCK">Solo con stock</option><option value="STOCK_BAJO">Stock bajo</option><option value="SIN_STOCK">Sin stock</option></select></label><label>Ordenar por<select value={sortFilter} onChange={e => setSortFilter(e.target.value)}><option value="NOMBRE">Nombre</option><option value="PRECIO">Precio</option><option value="STOCK">Stock</option></select></label></div><footer><button onClick={resetFilters}>Limpiar</button><button className="primary" onClick={() => { setRenderLimit(60); setFiltersOpen(false); }}>Aplicar filtros</button></footer></section></div>}{cartOpen && <StitchCart items={cart} client={client} observations={obs} busy={savingSale} editing={Boolean(editingOrderId)} online={online} onClose={() => setCartOpen(false)} onEmpty={() => { setCart([]); setObs(""); }} onRemove={removeItem} onStep={changeUnits} onQuantity={setUnits} onToggleFraction={toggleFraction} onFraction={setFraction} onObservations={setObs} onDraft={saveDraft} onSave={save}/>}{success && <div className="sale-success sale-confirmation" role="dialog" aria-modal="true" aria-label="Pedido registrado"><div className="success-rays"></div><section><span className="success-check">✓</span><small>{success.offline ? "GUARDADO EN ESTE DISPOSITIVO" : "OPERACIÓN REGISTRADA"}</small><h2>{success.offline ? "Pedido pendiente de sincronización" : "Pedido registrado"}</h2><strong>{money(success.total)}</strong><h3>{success.cliente}</h3><p>Pedido: <b>{success.ventaId}</b></p><time>{success.fecha}</time><em>{success.offline ? "Se sincronizará automáticamente con Supabase cuando regrese la conexión." : "Registrado correctamente en Supabase."}</em><div className="success-actions"><button onClick={viewCompletedOrder} disabled={success.offline}>Ver pedido</button><button className="primary" onClick={startNewSale}>Nueva preventa</button></div></section></div>}</div>;

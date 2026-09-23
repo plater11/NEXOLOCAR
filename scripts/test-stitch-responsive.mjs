@@ -60,7 +60,7 @@ for (const width of [390,768,1440]) {
   const nav=page.locator('.stitch-sidebar-menu');
   const primary=nav.locator('.sidebar-primary-item').filter({hasText:label});
   if(!child || await primary.getAttribute('aria-expanded') !== 'true')await primary.click();
-  if(child)await nav.locator('.menu-group-items button').filter({hasText:child}).click();
+  if(child && label !== 'Preventa')await nav.locator('.menu-group-items button').filter({hasText:child}).click();
   await page.locator(selector).first().waitFor({timeout:15000});
   await page.waitForTimeout(250);
   await shot((child || label).replaceAll(' ','-'));
@@ -78,16 +78,26 @@ for (const width of [390,768,1440]) {
     if(!download.suggestedFilename().endsWith('.xlsx'))throw new Error('Material export missing');
   }
   if(child === 'Nueva preventa') {
+    const launch=page.locator('.sx-cart-launch');
+    const box=await launch.boundingBox();
+    if(!box || box.y<0 || box.y+box.height>900)throw new Error('Cart not in viewport');
     await page.getByRole('textbox',{name:'Buscar cliente',exact:true}).fill('Cliente');
     await page.locator('.sx-client-options button').first().click();
+    await page.getByRole('button',{name:'Seleccionar Producto mayorista 1 paquete x10',exact:true}).click();
+    if(!await launch.innerText().then(t=>t.includes('15.00')))throw new Error('Card did not add material');
     await page.getByRole('button',{name:'Agregar Producto mayorista 1 paquete x10',exact:true}).click();
+    if(!await launch.innerText().then(t=>t.includes('30.00')))throw new Error('Plus added incorrect quantity');
     await page.locator('.sx-cart-launch').click();
     const cart=page.getByRole('dialog',{name:'Carrito de preventa'});
     await cart.getByRole('spinbutton',{name:'Cantidad de Producto mayorista 1 paquete x10',exact:true}).fill('2');
     if(!(await cart.locator('.sx-cart-total').innerText()).includes('30.00'))throw new Error('Wrong cart total');
     await shot('carrito');
-    await page.keyboard.press('Escape');
+    await cart.getByRole('button',{name:'Guardar borrador',exact:true}).click();
     await cart.waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'Continuar preventa',exact:true}).click();
+    if(!(await launch.innerText()).includes('30.00'))throw new Error('Draft total not restored');
+    await launch.click();
+    await page.keyboard.press('Escape');
   }
   if(child === 'Por comprar') {
     await page.getByRole('button',{name:'QA-PEDIDO-0',exact:true}).click();
