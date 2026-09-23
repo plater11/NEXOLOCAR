@@ -1,5 +1,10 @@
 .sx-sales{padding-bottom:90px}
-.sx-sales-tabs{display:flex;gap:8px}
+.sx-sales-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(100%,440px)}
+.sx-item-count{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 6px;border-radius:50%;background:#fff0e4;color:#974300;font-size:13px;font-weight:700;vertical-align:middle}
+.sx-cart-dialog h2{display:flex;align-items:center;gap:8px}
+.sx-cart-launch>span{display:flex;align-items:center;gap:10px}
+.sx-cart-client{display:grid;gap:8px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;font-size:13px}
+.sx-cart-client select{width:100%;min-width:0;min-height:44px;border:1px solid #cbd5e1;border-radius:8px;background:white;padding:8px;font-size:14px;color:#111c2d}
 .sx-sales-tabs button,.sx-sound-toggle{min-height:44px;padding:10px 16px;border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:10px;cursor:pointer}
 .sx-sales-tabs button[aria-pressed=true]{background:#be5600;color:#fff;border-color:#be5600}
 .sx-sound-toggle{justify-self:end;font-size:12px}

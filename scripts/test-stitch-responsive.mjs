@@ -65,6 +65,12 @@ for (const width of [390,768,1440]) {
   await page.waitForTimeout(250);
   await shot((child || label).replaceAll(' ','-'));
   console.log(JSON.stringify({width,screen:child || label,passed:true}));
+  if(label === 'Clientes') {
+    await page.goBack();
+    await page.getByText('Hola, Prueba',{exact:true}).waitFor();
+    await page.goForward();
+    await page.locator('.sx-directory').waitFor();
+  }
   if(label === 'Reportes') {
     await page.locator('.sx-report-filters select').selectOption('Limpieza');
     const materialRows=page.locator('.sx-material-ranking article');
@@ -78,6 +84,10 @@ for (const width of [390,768,1440]) {
     if(!download.suggestedFilename().endsWith('.xlsx'))throw new Error('Material export missing');
   }
   if(child === 'Nueva preventa') {
+    if(await page.locator('.stitch-sidebar-menu .sidebar-primary-item').filter({hasText:'Preventa'}).getAttribute('aria-expanded') !== null)throw new Error('Preventa still has submenu');
+    const tabs=page.locator('.sx-sales-tabs button');
+    const tabWidths=await tabs.evaluateAll(nodes=>nodes.map(node=>node.getBoundingClientRect().width));
+    if(Math.abs(tabWidths[0]-tabWidths[1])>1)throw new Error('Preventa tabs have unequal widths');
     const launch=page.locator('.sx-cart-launch');
     const box=await launch.boundingBox();
     if(!box || box.y<0 || box.y+box.height>900)throw new Error('Cart not in viewport');
@@ -89,6 +99,15 @@ for (const width of [390,768,1440]) {
     if(!await launch.innerText().then(t=>t.includes('30.00')))throw new Error('Plus added incorrect quantity');
     await page.locator('.sx-cart-launch').click();
     const cart=page.getByRole('dialog',{name:'Carrito de preventa'});
+    await cart.getByLabel('Cliente del pedido').selectOption('');
+    if(await cart.getByRole('button',{name:'Registrar preventa',exact:true}).isEnabled())throw new Error('Sale allowed without client');
+    await cart.getByLabel('Cliente del pedido').selectOption('QA1');
+    if(!await cart.getByRole('button',{name:'Registrar preventa',exact:true}).isEnabled())throw new Error('Cart client not selected');
+    if((await cart.locator('.sx-item-count').innerText())!=='1')throw new Error('Wrong material count');
+    await page.goBack();
+    await cart.waitFor({state:'hidden'});
+    await page.locator('.sx-catalogue').waitFor();
+    await launch.click();
     await cart.getByRole('spinbutton',{name:'Cantidad de Producto mayorista 1 paquete x10',exact:true}).fill('2');
     if(!(await cart.locator('.sx-cart-total').innerText()).includes('30.00'))throw new Error('Wrong cart total');
     await shot('carrito');
@@ -98,6 +117,11 @@ for (const width of [390,768,1440]) {
     if(!(await launch.innerText()).includes('30.00'))throw new Error('Draft total not restored');
     await launch.click();
     await page.keyboard.press('Escape');
+    await cart.waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'Borradores (1)',exact:true}).click();
+    await page.locator('.sx-draft-list').waitFor();
+    await page.goBack();
+    await page.locator('.sx-catalogue').waitFor();
   }
   if(child === 'Por comprar') {
     await page.getByRole('button',{name:'QA-PEDIDO-0',exact:true}).click();

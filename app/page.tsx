@@ -181,7 +181,7 @@ type SidebarItem = { label: string; target: string; icon: string; children?: Sid
 const sidebarItems: SidebarItem[] = [
     { label: "Inicio", target: "Inicio", icon: "⌂" },
     { label: "Clientes", target: "Clientes", icon: "♙" },
-    { label: "Preventa", target: "Preventa", icon: "▧", children: [{ label: "Preventa", value: "NUEVA" }, { label: "Borradores", value: "BORRADORES" }] },
+    { label: "Preventa", target: "Preventa", icon: "▧" },
     { label: "Pedidos", target: "Pedidos y emisión", icon: "🛒", children: [{ label: "Por comprar", value: "POR_COMPRAR" }, { label: "Listo para entrega", value: "LISTO_PARA_ENTREGA" }, { label: "En ruta", value: "EN_RUTA" }, { label: "Entregado", value: "ENTREGADO" }, { label: "Observado", value: "OBSERVADO" }, { label: "Cobranza", value: "COBRANZA" }] },
     { label: "Rendiciones", target: "Centro de rendiciones", icon: "▤", children: [{ label: "Resumen", value: "RESUMEN" }, { label: "Nueva rendición", value: "NUEVA_RENDICION" }] },
     { label: "Inventario", target: "Productos e inventario", icon: "♜", children: [{ label: "Existencias", value: "Inventario" }, { label: "Nuevo ingreso", value: "Ingresar stock" }, { label: "Actualizar stock", value: "Carga masiva" }, { label: "Movimientos", value: "Historial" }, { label: "Toma de inventario", value: "Editar" }] },
@@ -344,6 +344,23 @@ export default function Home() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [navigationVersion, setNavigationVersion] = useState(0);
     const [expandedMenu, setExpandedMenu] = useState("");
+    const historyId = useRef("");
+    const navigationKeys = ["nexo_order_tab", "nexo_inventory_view", "nexo_finance_view", "nexa_admin_view", "nexo_rendition_view", "nexo_sales_view"];
+    useEffect(() => {
+        if (!session) return;
+        const id = crypto.randomUUID(); historyId.current = id;
+        history.replaceState({ ...history.state, nexaNavigation: { id, label: "Inicio", views: {} }, nexaLayer: undefined }, "");
+        const back = (event: PopStateEvent) => {
+            const entry = event.state?.nexaNavigation;
+            if (!entry || entry.id === historyId.current || !canViewModule(session, entry.label)) return;
+            historyId.current = entry.id;
+            for (const key of navigationKeys) { if (entry.views[key] != null) localStorage.setItem(key, entry.views[key]); else localStorage.removeItem(key); }
+            setActive(entry.label); setNavigationVersion(v => v + 1); setMobileMenuOpen(false);
+            window.scrollTo(0, 0);
+        };
+        window.addEventListener("popstate", back);
+        return () => window.removeEventListener("popstate", back);
+    }, [session?.usuario]);
     const [online, setOnline] = useState(true);
     const [toast, setToast] = useState("");
     const [pending, setPending] = useState(0);
@@ -639,7 +656,13 @@ export default function Home() {
     if (!session)
         return <Login onLogin={s => { setSession(s); setChecking(false); }}/>;
     const allowed = (name: string) => canViewModule(session, name);
-    const navigate = (label: string) => { setActive(label); setNavigationVersion(version => version + 1); if (label === "Configuración") setExpandedMenu("Administración"); setMobileMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    const navigate = (label: string) => {
+        if (label === "Preventa") cacheSet("nexo_sales_view", "NUEVA");
+        const views = Object.fromEntries(navigationKeys.map(key => [key, localStorage.getItem(key)]));
+        const id = crypto.randomUUID(); historyId.current = id;
+        history.pushState({ ...history.state, nexaNavigation: { id, label, views }, nexaLayer: undefined, nexaSales: undefined }, "");
+        setActive(label); setNavigationVersion(version => version + 1); if (label === "Configuración") setExpandedMenu("Administración"); setMobileMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" });
+    };
     const openSidebarChild = (item: SidebarItem, child: SidebarChild) => { const cacheKey = item.label === "Pedidos" ? "nexo_order_tab" : item.label === "Inventario" ? "nexo_inventory_view" : item.label === "Gestión financiera" ? "nexo_finance_view" : item.label === "Administración" ? "nexa_admin_view" : item.label === "Rendiciones" ? "nexo_rendition_view" : "nexo_sales_view"; cacheSet(cacheKey, child.value); navigate(item.target); };
     const primaryMobile = (session.perfil === "PREVENTA" ? ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"] : ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"]).filter(allowed);
     const secondaryMobile = menu.filter(label => allowed(label) && !primaryMobile.includes(label));
@@ -871,7 +894,24 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         return legacy?.items?.length ? [{ ...legacy, id: "legacy" }] : [];
     });
     const [draftId, setDraftId] = useState("");
-    const [salesView, setSalesView] = useState("NUEVA");
+    const [salesView, setSalesViewState] = useState("NUEVA");
+    const [cartOpen, setCartOpenState] = useState(false);
+    const salesHistory = (view: string, cartVisible: boolean, replace = false) => {
+        const state = { ...history.state, nexaSales: { view, cartVisible } };
+        if (replace) history.replaceState(state, ""); else history.pushState(state, "");
+        setSalesViewState(view); setCartOpenState(cartVisible);
+    };
+    const setSalesView = (view: string) => salesHistory(view, false);
+    const setCartOpen = (open: boolean) => {
+        if (open) salesHistory(salesView, true);
+        else if (history.state?.nexaSales?.cartVisible) history.back();
+        else setCartOpenState(false);
+    };
+    useEffect(() => {
+        const restore = () => { const state = history.state?.nexaSales; setSalesViewState(state?.view || "NUEVA"); setCartOpenState(Boolean(state?.cartVisible)); };
+        window.addEventListener("popstate", restore);
+        return () => window.removeEventListener("popstate", restore);
+    }, []);
     const [soundEnabled, setSoundEnabled] = useState(() => cacheGet("nexo_cart_sound", true));
     const clientPickerRef = useRef<HTMLDivElement>(null);
     const [client, setClient] = useState(""), [clientQuery, setClientQuery] = useState(""), [clientOpen, setClientOpen] = useState(false);
@@ -978,14 +1018,13 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         setDrafts(updated); setDraftId("");
         setCart([]); setClient(""); setClientQuery(""); setObs(""); setEditingOrderId("");
         notify("Borrador guardado en este dispositivo");
-        setCartOpen(false);
-        setSalesView("BORRADORES");
+        salesHistory("BORRADORES", false, true);
     }
     function resumeDraft(draft: Draft) {
         if (cart.length && draftId !== draft.id && !window.confirm("¿Reemplazar el carrito actual con este borrador? Guarda antes cualquier cambio que quieras conservar.")) return;
         setDraftId(draft.id); setClient(draft.cliente); setClientQuery(draft.cliente);
         setCart(draft.items); setObs(draft.observaciones); setEditingOrderId(draft.editingOrderId || "");
-        setSalesView("NUEVA"); setCartOpen(false);
+        salesHistory("NUEVA", false);
     }
     function clearCompletedSale(removeDraft = false) {
         if (removeDraft && draftId) { const remaining = drafts.filter(draft => draft.id !== draftId); cacheSet(draftKey, remaining); setDrafts(remaining); }
@@ -995,7 +1034,7 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         setClientQuery("");
         setClientOpen(false);
         setObs("");
-        setCartOpen(false);
+        salesHistory("NUEVA", false, true);
         resetFilters();
         localStorage.removeItem("nexo_sale_draft");
         setEditingOrderId("");
@@ -1059,8 +1098,7 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
             setSavingSale(false);
         }
     }
-    const [cartOpen, setCartOpen] = useState(false);
-    useEffect(() => { setSalesView(cacheGet<string>("nexo_sales_view", "NUEVA")); setCartOpen(false); }, [navigationVersion]);
+    useEffect(() => { setSalesViewState(history.state?.nexaSales?.view || "NUEVA"); setCartOpenState(Boolean(history.state?.nexaSales?.cartVisible)); }, [navigationVersion]);
     const cartUnits = Number(cart.reduce((total, item) => total + item.cantidad, 0).toFixed(2));
     const cartTotal = cart.reduce((total, item) => total + item.cantidad * item.precioVenta, 0);
     const activeFilters = Number(groupFilter !== "TODOS") + Number(stockFilter !== "TODOS") + Number(sortFilter !== "NOMBRE");
@@ -1083,8 +1121,8 @@ function Sales({ products, clients, call, refreshProducts, refreshData, notify, 
         <nav className="sx-chips">{["TODOS",...groups].map(g => <button key={g} className={groupFilter === g ? "selected" : ""} onClick={() => { setGroupFilter(g); setRenderLimit(60); }}>{g === "TODOS" ? "Todas" : g}</button>)}</nav>
         <section className="sx-catalogue">{renderedProducts.map(p => { const info = presentation(p), item = cart.find(i => i.codigo === p.codigo); return <article key={p.codigo} onClick={event => { if (!(event.target as HTMLElement).closest("button")) add(p); }}><button className="sx-product-main" aria-label={`Seleccionar ${p.nombre}`} onClick={() => add(p)} disabled={p.stock < info.factor}><span className="sx-product-placeholder" aria-hidden="true">{p.nombre.slice(0,2)}</span><small>{p.codigo}</small><b>{p.nombre}</b><small>{info.nombrePresentacion} {info.factor > 1 ? `x${info.factor}` : ""} · Stock {Number((p.stock/info.factor).toFixed(2))}</small><strong>{money(info.precioPresentacion)}</strong></button><div className="sx-stepper"><button aria-label={`Quitar uno de ${p.nombre}`} disabled={!item} onClick={() => item && changeUnits(item,-1)}>−</button><b>{item?.cantidad || 0}</b><button aria-label={`Agregar ${p.nombre}`} disabled={p.stock < info.factor} onClick={() => add(p)}>+</button></div></article>; })}</section>
         {renderLimit < visible.length && <button onClick={() => setRenderLimit(n => n+60)}>Ver más productos</button>}{!visible.length && <p className="sx-empty">No se encontraron productos con estos filtros.</p>}
-        <button className="sx-cart-launch" onClick={() => setCartOpen(true)}><span>{cartUnits} · Ver carrito</span><strong>{money(cartTotal)}</strong></button>
-        {filtersOpen && <div className="modal-bg pos-sheet-bg" onClick={() => setFiltersOpen(false)}><section className="pos-filter-sheet" onClick={e => e.stopPropagation()}><header><div><small>PREVENTA</small><h2>Filtros de productos</h2></div><button onClick={() => setFiltersOpen(false)}>×</button></header><div className="filter-sheet-body"><label>Categoría<select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}><option value="TODOS">Todas las categorías</option>{groups.map(g => <option key={g}>{g}</option>)}</select></label><label>Disponibilidad<select value={stockFilter} onChange={e => setStockFilter(e.target.value)}><option value="TODOS">Todo el catálogo</option><option value="CON_STOCK">Solo con stock</option><option value="STOCK_BAJO">Stock bajo</option><option value="SIN_STOCK">Sin stock</option></select></label><label>Ordenar por<select value={sortFilter} onChange={e => setSortFilter(e.target.value)}><option value="NOMBRE">Nombre</option><option value="PRECIO">Precio</option><option value="STOCK">Stock</option></select></label></div><footer><button onClick={resetFilters}>Limpiar</button><button className="primary" onClick={() => { setRenderLimit(60); setFiltersOpen(false); }}>Aplicar filtros</button></footer></section></div>}{cartOpen && <StitchCart items={cart} client={client} observations={obs} busy={savingSale} editing={Boolean(editingOrderId)} online={online} onClose={() => setCartOpen(false)} onEmpty={() => { setCart([]); setObs(""); }} onRemove={removeItem} onStep={changeUnits} onQuantity={setUnits} onToggleFraction={toggleFraction} onFraction={setFraction} onObservations={setObs} onDraft={saveDraft} onSave={save}/>}{success && <div className="sale-success sale-confirmation" role="dialog" aria-modal="true" aria-label="Pedido registrado"><div className="success-rays"></div><section><span className="success-check">✓</span><small>{success.offline ? "GUARDADO EN ESTE DISPOSITIVO" : "OPERACIÓN REGISTRADA"}</small><h2>{success.offline ? "Pedido pendiente de sincronización" : "Pedido registrado"}</h2><strong>{money(success.total)}</strong><h3>{success.cliente}</h3><p>Pedido: <b>{success.ventaId}</b></p><time>{success.fecha}</time><em>{success.offline ? "Se sincronizará automáticamente con Supabase cuando regrese la conexión." : "Registrado correctamente en Supabase."}</em><div className="success-actions"><button onClick={viewCompletedOrder} disabled={success.offline}>Ver pedido</button><button className="primary" onClick={startNewSale}>Nueva preventa</button></div></section></div>}</div>;
+<button className="sx-cart-launch" onClick={() => setCartOpen(true)}><span><span className="sx-item-count" aria-label={`${cart.length} materiales`}>{cart.length}</span> Ver carrito</span><strong>{money(cartTotal)}</strong></button>
+        {filtersOpen && <div className="modal-bg pos-sheet-bg" onClick={() => setFiltersOpen(false)}><section className="pos-filter-sheet" onClick={e => e.stopPropagation()}><header><div><small>PREVENTA</small><h2>Filtros de productos</h2></div><button onClick={() => setFiltersOpen(false)}>×</button></header><div className="filter-sheet-body"><label>Categoría<select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}><option value="TODOS">Todas las categorías</option>{groups.map(g => <option key={g}>{g}</option>)}</select></label><label>Disponibilidad<select value={stockFilter} onChange={e => setStockFilter(e.target.value)}><option value="TODOS">Todo el catálogo</option><option value="CON_STOCK">Solo con stock</option><option value="STOCK_BAJO">Stock bajo</option><option value="SIN_STOCK">Sin stock</option></select></label><label>Ordenar por<select value={sortFilter} onChange={e => setSortFilter(e.target.value)}><option value="NOMBRE">Nombre</option><option value="PRECIO">Precio</option><option value="STOCK">Stock</option></select></label></div><footer><button onClick={resetFilters}>Limpiar</button><button className="primary" onClick={() => { setRenderLimit(60); setFiltersOpen(false); }}>Aplicar filtros</button></footer></section></div>}{cartOpen && <StitchCart items={cart} client={client} clients={clients} onClientChange={id => { const chosen = clients.find(c => c.id === id); if (chosen) chooseClient(chosen); else { setClient(""); setClientQuery(""); } }} observations={obs} busy={savingSale} editing={Boolean(editingOrderId)} online={online} onClose={() => setCartOpen(false)} onEmpty={() => { setCart([]); setObs(""); }} onRemove={removeItem} onStep={changeUnits} onQuantity={setUnits} onToggleFraction={toggleFraction} onFraction={setFraction} onObservations={setObs} onDraft={saveDraft} onSave={save}/>}{success && <div className="sale-success sale-confirmation" role="dialog" aria-modal="true" aria-label="Pedido registrado"><div className="success-rays"></div><section><span className="success-check">✓</span><small>{success.offline ? "GUARDADO EN ESTE DISPOSITIVO" : "OPERACIÓN REGISTRADA"}</small><h2>{success.offline ? "Pedido pendiente de sincronización" : "Pedido registrado"}</h2><strong>{money(success.total)}</strong><h3>{success.cliente}</h3><p>Pedido: <b>{success.ventaId}</b></p><time>{success.fecha}</time><em>{success.offline ? "Se sincronizará automáticamente con Supabase cuando regrese la conexión." : "Registrado correctamente en Supabase."}</em><div className="success-actions"><button onClick={viewCompletedOrder} disabled={success.offline}>Ver pedido</button><button className="primary" onClick={startNewSale}>Nueva preventa</button></div></section></div>}</div>;
 }
 
 function Orders({ orders, call, refresh, notify, onNavigate, onOrderUpdated }: {
