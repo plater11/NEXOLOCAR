@@ -107,9 +107,11 @@ for (const width of [390,768,1440]) {
     if(!await launch.innerText().then(t=>t.includes('30.00')))throw new Error('Plus added incorrect quantity');
     await page.locator('.sx-cart-launch').click();
     const cart=page.getByRole('dialog',{name:'Carrito de preventa'});
-    await cart.getByLabel('Cliente del pedido').selectOption('');
+    await cart.getByLabel('Cliente del pedido').fill('zz-no-existe');
+    await cart.getByText('No se encontraron clientes.',{exact:true}).waitFor();
     if(await cart.getByRole('button',{name:'Registrar preventa',exact:true}).isEnabled())throw new Error('Sale allowed without client');
-    await cart.getByLabel('Cliente del pedido').selectOption('QA1');
+    await cart.getByLabel('Cliente del pedido').fill('999999999');
+    await cart.locator('.sx-cart-client-results button').first().click();
     if(!await cart.getByRole('button',{name:'Registrar preventa',exact:true}).isEnabled())throw new Error('Cart client not selected');
     if((await cart.locator('.sx-item-count').innerText())!=='1')throw new Error('Wrong material count');
     await page.goBack();
