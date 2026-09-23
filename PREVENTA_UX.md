@@ -2,6 +2,7 @@
 
 - Impacto revisado con CodeGraph: Sales, sidebarItems, StitchNavigation, saveDraft, save y StitchCart.
 - Menú Preventa sin subsecciones; botones internos Preventa y Borradores del mismo tamaño.
+- Ambas pestañas comparten cabecera y barra de herramientas; el título no cambia de posición. Espacio de scrollbar reservado para evitar desplazamiento horizontal. Prueba de regresión compara x/y/ancho/alto de las pestañas al alternar.
 - Carrito con contador circular de materiales distintos y selector de cliente existente.
 - Historial del navegador para cambios de sección, destinos de submenú y vistas Preventa/Borradores/carrito. Atrás cierra el carrito antes de volver a la sección previa; Adelante restaura el destino.
 - No se bloquea la salida del navegador cuando ya no hay una sección anterior en su historial. No altera la sesión autenticada.

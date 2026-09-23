@@ -1,4 +1,11 @@
 .sx-sales{padding-bottom:90px}
+html:has(.sx-sales){scrollbar-gutter:stable}
+.sx-sales-header{display:grid;gap:12px;min-width:0}
+.sx-sales-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sx-sales-tools{display:flex;align-items:center;gap:8px}
+.sx-sales-tools button{min-height:44px;padding:10px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;color:#475569;font-size:12px;cursor:pointer}
+.sx-sales-tools button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:600px){.sx-sales-toolbar{display:grid;grid-template-columns:minmax(0,1fr)}.sx-sales-toolbar .sx-sales-tabs{width:100%}.sx-sales-tools{justify-content:flex-end}}
 .sx-sales-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(100%,440px)}
 .sx-item-count{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 6px;border-radius:50%;background:#fff0e4;color:#974300;font-size:13px;font-weight:700;vertical-align:middle}
 .sx-cart-dialog h2{display:flex;align-items:center;gap:8px}

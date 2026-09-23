@@ -88,6 +88,14 @@ for (const width of [390,768,1440]) {
     const tabs=page.locator('.sx-sales-tabs button');
     const tabWidths=await tabs.evaluateAll(nodes=>nodes.map(node=>node.getBoundingClientRect().width));
     if(Math.abs(tabWidths[0]-tabWidths[1])>1)throw new Error('Preventa tabs have unequal widths');
+    const beforeTabs=await page.locator('.sx-sales-tabs').boundingBox();
+    await page.getByRole('button',{name:'Borradores (0)',exact:true}).click();
+    await page.locator('.sx-draft-list').waitFor();
+    const afterTabs=await page.locator('.sx-sales-tabs').boundingBox();
+    if(!beforeTabs || !afterTabs || ['x','y','width','height'].some(key=>Math.abs(beforeTabs[key]-afterTabs[key])>1))throw new Error('Tabs shifted switching to drafts');
+    await shot('borradores-estable');
+    await page.goBack();
+    await page.locator('.sx-catalogue').waitFor();
     const launch=page.locator('.sx-cart-launch');
     const box=await launch.boundingBox();
     if(!box || box.y<0 || box.y+box.height>900)throw new Error('Cart not in viewport');
