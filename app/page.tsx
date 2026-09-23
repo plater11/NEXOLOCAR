@@ -182,7 +182,7 @@ const sidebarItems: SidebarItem[] = [
     { label: "Inicio", target: "Inicio", icon: "⌂" },
     { label: "Clientes", target: "Clientes", icon: "♙" },
     { label: "Preventa", target: "Preventa", icon: "▧" },
-    { label: "Pedidos", target: "Pedidos y emisión", icon: "🛒", children: [{ label: "Por comprar", value: "POR_COMPRAR" }, { label: "Listo para entrega", value: "LISTO_PARA_ENTREGA" }, { label: "En ruta", value: "EN_RUTA" }, { label: "Entregado", value: "ENTREGADO" }, { label: "Observado", value: "OBSERVADO" }, { label: "Cobranza", value: "COBRANZA" }] },
+    { label: "Pedidos", target: "Pedidos y emisión", icon: "🛒" },
     { label: "Rendiciones", target: "Centro de rendiciones", icon: "▤" },
     { label: "Inventario", target: "Productos e inventario", icon: "♜", children: [{ label: "Existencias", value: "Inventario" }, { label: "Nuevo ingreso", value: "Ingresar stock" }, { label: "Actualizar stock", value: "Carga masiva" }, { label: "Movimientos", value: "Historial" }, { label: "Toma de inventario", value: "Editar" }] },
     { label: "Gestión financiera", target: "Gestión financiera", icon: "▣", children: [{ label: "Presupuesto", value: "PRESUPUESTO" }, { label: "Cuentas por cobrar", value: "COBRANZA" }, { label: "Cierre de cuenta", value: "CIERRE" }, { label: "Análisis de ventas", value: "ANALISIS" }, { label: "Reporte de caja", value: "CAJA" }] },
@@ -674,7 +674,7 @@ export default function Home() {
     const primaryMobile = (session.perfil === "PREVENTA" ? ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"] : ["Inicio", "Clientes", "Preventa", "Pedidos y emisión"]).filter(allowed);
     const secondaryMobile = menu.filter(label => allowed(label) && !primaryMobile.includes(label));
     const toastKind = /error|no se pudo|no se registr|inválid|revisa|indica|falt/i.test(toast) ? "error" : /pendiente|observad|advert/i.test(toast) ? "warning" : "success";
-    return <main className={`app-shell role-${session.perfil.toLowerCase()} ${pending ? "is-processing" : ""}`}><StitchNavigation items={sidebarItems.filter(item => allowed(item.target))} active={active} expanded={expandedMenu} onExpand={setExpandedMenu} onNavigate={navigate} onChild={openSidebarChild} open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} user={session} onLogout={logout}/><section className="workspace"><header className="topbar stitch-appbar"><div className="mobile-brand"><button className="mobile-menu-trigger" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menú" aria-expanded={mobileMenuOpen} aria-controls="nexa-navigation">☰</button><img src="/nexa-group-logo.png" alt=""/><span>NEXA GROUP</span></div><div className="page-identity"><small>{new Date().toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Lima" })}</small><h1>{active}</h1></div><div className="top-actions"><span className={`sync-pill ${online ? "" : "offline"}`}>● {online ? (pending ? "Procesando solicitud…" : loading ? "Actualizando…" : "Sincronizado") : "Modo local"}</span><button onClick={refresh} disabled={pending > 0}>↻ Actualizar</button></div></header><div className="content">{active === "Inicio" && <Dashboard summary={summary} orders={orders} clients={clients} receivables={collectionRows} activities={activities} onNavigate={navigate} session={session}/>}{active === "Clientes" && <Clients clients={clients} call={call} refresh={refresh} notify={notify} online={online}/>}{active === "Preventa" && <Sales navigationVersion={navigationVersion} products={products} clients={clients} call={call} refreshProducts={refreshProducts} refreshData={refresh} notify={notify} online={online} onNavigate={navigate}/>}{active === "Pedidos y emisión" && <Orders key={`orders-${navigationVersion}`} orders={orders} call={call} refresh={refresh} notify={notify} onNavigate={navigate} onOrderUpdated={updated => setOrders(rows => dedupeOrders(rows.map(row => row.ventaId === updated.ventaId ? updated : row)))}/>}{active === "Centro de rendiciones" && <Collections key={`renditions-${navigationVersion}`} rows={collectionRows} clients={clients} loading={collectionsLoading} load={refreshCollections} call={call} notify={notify}/>}{active === "Productos e inventario" && <Inventory key={`inventory-${navigationVersion}`} products={products} call={call} refresh={refresh} notify={notify} master={session.perfil === "MASTER"}/>}{active === "Gestión financiera" && <Finance key={`finance-${navigationVersion}`} call={call} notify={notify} onNavigate={navigate}/>}{active === "Reportes" && <Reports call={call} notify={notify} products={products}/>}{active === "Análisis" && <Analytics call={call} notify={notify}/>}{active === "Configuración" && <Settings key={`settings-${navigationVersion}`} call={call} notify={notify} session={session}/>}</div></section><button className={`sidebar-backdrop ${mobileMenuOpen ? "show" : ""}`} onClick={() => setMobileMenuOpen(false)} tabIndex={-1} aria-hidden="true"></button>{pending > 0 && <div className="processing-banner"><i></i><span><b>Procesando solicitud</b><small>No cierres la ventana ni vuelvas a presionar el botón.</small></span></div>}{toast && <div className={`toast ${toastKind}`} role={toastKind === "error" ? "alert" : "status"}>{toastKind === "success" ? "✓ " : toastKind === "error" ? "✕ " : "⚠ "}{toast}</div>}</main>;
+    return <main className={`app-shell role-${session.perfil.toLowerCase()} ${pending ? "is-processing" : ""}`}><StitchNavigation items={sidebarItems.filter(item => allowed(item.target))} active={active} expanded={expandedMenu} onExpand={setExpandedMenu} onNavigate={navigate} onChild={openSidebarChild} open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} user={session} onLogout={logout}/><section className="workspace"><header className="topbar stitch-appbar"><div className="mobile-brand"><button className="mobile-menu-trigger" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menú" aria-expanded={mobileMenuOpen} aria-controls="nexa-navigation">☰</button><img src="/nexa-group-logo.png" alt=""/><span>NEXA GROUP</span></div><div className="page-identity"><small>{new Date().toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Lima" })}</small><h1>{active}</h1></div><div className="top-actions"><span className={`sync-pill ${online ? "" : "offline"}`}>● {online ? (pending ? "Procesando solicitud…" : loading ? "Actualizando…" : "Sincronizado") : "Modo local"}</span><button onClick={refresh} disabled={pending > 0}>↻ Actualizar</button></div></header><div className="content">{active === "Inicio" && <Dashboard summary={summary} orders={orders} clients={clients} receivables={collectionRows} activities={activities} onNavigate={navigate} session={session}/>}{active === "Clientes" && <Clients clients={clients} call={call} refresh={refresh} notify={notify} online={online}/>}{active === "Preventa" && <Sales navigationVersion={navigationVersion} products={products} clients={clients} call={call} refreshProducts={refreshProducts} refreshData={refresh} notify={notify} online={online} onNavigate={navigate}/>}{active === "Pedidos y emisión" && <Orders key={`orders-${navigationVersion}`} orders={orders} call={call} refresh={refresh} notify={notify} onNavigate={navigate} onOrderUpdated={updated => setOrders(rows => dedupeOrders(rows.map(row => row.ventaId === updated.ventaId ? updated : row)))}/>}{active === "Centro de rendiciones" && <Collections key={`renditions-${navigationVersion}`} rows={collectionRows} clients={clients} loading={collectionsLoading} load={refreshCollections} call={call} notify={notify} canUploadReceipt={dataSourceLabel.toUpperCase().includes("SUPABASE")}/>}{active === "Productos e inventario" && <Inventory key={`inventory-${navigationVersion}`} products={products} call={call} refresh={refresh} notify={notify} master={session.perfil === "MASTER"}/>}{active === "Gestión financiera" && <Finance key={`finance-${navigationVersion}`} call={call} notify={notify} onNavigate={navigate}/>}{active === "Reportes" && <Reports call={call} notify={notify} products={products}/>}{active === "Análisis" && <Analytics call={call} notify={notify}/>}{active === "Configuración" && <Settings key={`settings-${navigationVersion}`} call={call} notify={notify} session={session}/>}</div></section><button className={`sidebar-backdrop ${mobileMenuOpen ? "show" : ""}`} onClick={() => setMobileMenuOpen(false)} tabIndex={-1} aria-hidden="true"></button>{pending > 0 && <div className="processing-banner"><i></i><span><b>Procesando solicitud</b><small>No cierres la ventana ni vuelvas a presionar el botón.</small></span></div>}{toast && <div className={`toast ${toastKind}`} role={toastKind === "error" ? "alert" : "status"}>{toastKind === "success" ? "✓ " : toastKind === "error" ? "✕ " : "⚠ "}{toast}</div>}</main>;
 }
 function Heading({ eyebrow, title, text, children }: {
     eyebrow: string;
@@ -708,6 +708,32 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
     const weekOrders = validOrders.filter(o => { const date = orderDate(o.fecha); return date >= weekStart && date <= today(); });
     const weeklyTicket = weekOrders.length ? weekOrders.reduce((sum, o) => sum + Number(o.total || 0), 0) / weekOrders.length : 0;
     const monthlyTicket = monthOrders.length ? presalesMonth / monthOrders.length : 0;
+    const chartMonth = month();
+    const chartYear = Number(chartMonth.slice(0, 4));
+    const chartMonthNumber = Number(chartMonth.slice(5, 7));
+    const chartDays = new Date(chartYear, chartMonthNumber, 0).getDate();
+    const dailySales = Array.from({ length: chartDays }, (_, index) => ({
+        day: index + 1,
+        total: 0,
+        documents: 0,
+    }));
+    validOrders.forEach(order => {
+        const date = orderDate(order.fecha);
+        if (!date.startsWith(chartMonth)) return;
+        const day = Number(date.slice(8, 10));
+        if (!day || !dailySales[day - 1]) return;
+        dailySales[day - 1].total += Number(order.total || 0);
+        if (order.codigoImpresion) dailySales[day - 1].documents += 1;
+    });
+    const chartWidth = 840, chartHeight = 280, chartLeft = 50, chartRight = 814, chartTop = 24, chartBottom = 218;
+    const chartStep = (chartRight - chartLeft) / Math.max(1, dailySales.length);
+    const chartMaxSales = Math.max(1, ...dailySales.map(row => row.total));
+    const chartMaxDocuments = Math.max(1, ...dailySales.map(row => row.documents));
+    const salesLine = dailySales.map((row, index) => {
+        const x = chartLeft + chartStep * (index + .5);
+        const y = chartBottom - row.total / chartMaxSales * (chartBottom - chartTop);
+        return `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
     const [birthdayOpen, setBirthdayOpen] = useState(false);
     const [closeOpen, setCloseOpen] = useState(false);
     const [closingPeriod, setClosingPeriod] = useState(false);
@@ -821,6 +847,16 @@ function Dashboard({ summary, orders, clients, receivables, activities, onNaviga
         <section className="sx-panel sx-dashboard-operations" aria-label="Resumen de pedidos"><StitchHeader title="Operaciones recientes" subtitle="Estado de tus pedidos" icon="truck"><button onClick={() => onNavigate("Pedidos y emisión")}>Ver todas</button></StitchHeader><div className="sx-operation-strip">{operationalCards.map(card => { const count = "count" in card ? card.count : card.rows.length; const total = "total" in card ? card.total : card.rows.reduce((s,o) => s + Number(o.total || 0),0); return <button key={card.state} className={`state-${card.state.toLowerCase()}`} onClick={() => openOrders(card.state,"","todayOnly" in card && Boolean(card.todayOnly))}><span>{card.label}</span><b>{count}</b><small>{money(total)}</small></button>; })}</div></section>
         <section className="sx-panel sx-dashboard-history" aria-label="Historial de operaciones"><StitchHeader title="Historial de operaciones" subtitle="Últimos movimientos registrados" icon="receipt"><button onClick={() => onNavigate("Pedidos y emisión")}>Ver pedidos</button></StitchHeader><div className="sx-lines">{activities.slice(0,10).map(item => <button key={item.id} onClick={() => openActivity(item)}><span className="sx-history-icon" aria-hidden="true"><StitchIcon name={item.entidad === "GASTO" ? "receipt" : item.ventaId ? "truck" : "box"}/></span><span className="sx-history-description"><b>{activityLabel(item)}</b><small>{item.cliente || "Operación del ERP"} · {new Date(item.fecha).toLocaleString("es-PE",{timeZone:"America/Lima",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</small><small>{item.descripcion}</small></span><span className="sx-history-amount"><strong>{item.monto > 0 ? money(item.monto) : ""}</strong><small className="sx-badge">{activityState(item)}</small></span></button>)}{!activities.length && <p className="sx-empty">Aún no hay operaciones registradas.</p>}</div></section>
         <section className="sx-mini-metrics"><button onClick={() => onNavigate("Reportes")}><span>Ticket semanal</span><b>{money(weeklyTicket)}</b></button><button onClick={() => onNavigate("Reportes")}><span>Ticket mensual</span><b>{money(monthlyTicket)}</b></button><button onClick={() => onNavigate("Pedidos y emisión")}><span>Preventas hoy</span><b>{money(presalesToday)}</b></button></section>
+        <section className="sx-panel sx-sales-evolution" aria-label="Evolución diaria de ventas y boletas">
+            <header><div><h3>Evolución diaria</h3><p>Ventas registradas y cantidad de boletas emitidas durante {new Date(`${chartMonth}-01T12:00:00`).toLocaleDateString("es-PE", { month: "long", year: "numeric" })}.</p></div><span className="sx-chart-period">MES ACTUAL</span></header>
+            <div className="sx-sales-chart-scroll"><svg className="sx-sales-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Gráfico combinado de montos de ventas y boletas por día">
+                {[0, 1, 2, 3].map(tick => { const y = chartBottom - (chartBottom - chartTop) * tick / 3; return <g key={tick}><line x1={chartLeft} x2={chartRight} y1={y} y2={y} className="sx-chart-gridline"/><text x={chartLeft - 8} y={y + 4} textAnchor="end" className="sx-chart-axis-label">{money(chartMaxSales * tick / 3).replace("S/ ", "")}</text><text x={chartRight + 8} y={y + 4} textAnchor="start" className="sx-chart-axis-label">{Math.round(chartMaxDocuments * tick / 3)}</text></g>; })}
+                {dailySales.map((row, index) => { const x = chartLeft + chartStep * (index + .5); const height = row.documents / chartMaxDocuments * (chartBottom - chartTop); return <g key={row.day}><rect x={x - Math.max(2, chartStep * .25)} y={chartBottom - height} width={Math.max(4, chartStep * .5)} height={Math.max(0, height)} rx="3" className="sx-chart-document-bar"><title>{row.day}/{String(chartMonthNumber).padStart(2, "0")}: {row.documents} boletas</title></rect>{(row.day === 1 || row.day % 3 === 0 || row.day === dailySales.length) && <text x={x} y={chartBottom + 22} textAnchor="middle" className="sx-chart-axis-label">{String(row.day).padStart(2, "0")}/{String(chartMonthNumber).padStart(2, "0")}</text>}</g>; })}
+                <path d={salesLine} className="sx-chart-sales-line"><title>Importe de ventas registradas por día</title></path>
+                {dailySales.map((row, index) => { const x = chartLeft + chartStep * (index + .5), y = chartBottom - row.total / chartMaxSales * (chartBottom - chartTop); return <circle key={`sales-${row.day}`} cx={x} cy={y} r="2.5" className="sx-chart-sales-point"><title>{row.day}/{String(chartMonthNumber).padStart(2, "0")}: {money(row.total)} en ventas</title></circle>; })}
+            </svg></div>
+            <footer><span><i className="sx-chart-sales-key"/>Ventas</span><span><i className="sx-chart-documents-key"/>Boletas emitidas</span><small>Montos en S/ · cantidad de documentos en el eje derecho</small></footer>
+        </section>
         {birthdayOpen&&<div className="modal-bg" onMouseDown={event=>{if(event.target===event.currentTarget)setBirthdayOpen(false);}}><section className="birthday-list-modal" role="dialog" aria-modal="true"><header><div><small>PRÓXIMOS 7 DÍAS</small><h2>Cumpleaños próximos</h2></div><button onClick={()=>setBirthdayOpen(false)}>×</button></header><div>{birthdays.map(client=><article key={client.id}><button onClick={()=>{cacheSet("nexo_focus_client",client.id);onNavigate("Clientes");}}><span><b>{client.nombre} {client.apellidos}</b><small>{client.contacto||"Sin teléfono"}</small></span><strong>{birthdayDays(client.fechaCumpleanos)===0?"Hoy":`En ${birthdayDays(client.fechaCumpleanos)} día(s)`}</strong></button></article>)}{!birthdays.length&&<p>0 cumpleaños próximos.</p>}</div></section></div>}
         {closeOpen&&<div className="modal-bg"><section className="period-close-modal"><header><div><small>CIERRE OPERATIVO</small><h2>Cerrar {periodLabel}</h2></div><button onClick={()=>setCloseOpen(false)}>×</button></header><div className="period-close-summary"><span>Ventas <b>{money(summary.ventasMes)}</b></span><span>Cobrado <b>{money(summary.cobradoMes)}</b></span><span>Por cobrar <b>{money(summary.porCobrar)}</b></span><span>Compras <b>{money(summary.comprasMes)}</b></span><span>Gastos <b>{money(summary.gastosMes)}</b></span><span>Resultado <b>{money(summary.resultadoMes)}</b></span><span>Stock valorizado <b>{money(summary.valorTotalInventario)}</b></span></div><div className="period-pending"><h3>Pendientes antes del cierre</h3><p>{buyingOrders.length+readyOrders.length+routeOrders.length} pedidos · {summary.clientesPorCobrar||0} cobranzas · {summary.rendicionesPendientes||0} rendiciones</p><small>El cierre guardará una fotografía del período, protegerá sus transacciones y abrirá el siguiente mes.</small></div><footer><button onClick={()=>setCloseOpen(false)}>Cancelar</button><button className="primary" disabled={closingPeriod} onClick={closePeriod}>{closingPeriod?"Cerrando…":"Confirmar cierre"}</button></footer></section></div>}
     </div>;
@@ -1473,13 +1509,14 @@ function WeeklyRendition({ call, notify, onRegisterExpense, onClose, onBudgetCat
         <section className="weekly-detail-grid"><article className="panel weekly-category-table"><h3>Detalle por categoría</h3><div className="table-wrap"><table><thead><tr><th>Categoría</th><th>Proyectado</th><th>Real</th><th>Variación</th><th>Estado</th></tr></thead><tbody>{categoryRows.map(row => <tr key={row.name}><td><b>{row.name}</b></td><td>{money(row.projected)}</td><td>{money(row.real)}</td><td>{money(row.real-row.projected)}</td><td><span className={row.real <= row.projected ? "within" : "over"}>{row.real <= row.projected ? "Dentro del plan" : "Excedido"}</span></td></tr>)}</tbody></table></div></article><article className="panel weekly-movements"><header><h3>Movimientos de la semana</h3><button onClick={exportWeek}>Exportar</button></header>{expenses.slice(0,8).map(item => <div key={item.solicitudId}><span><b>{item.descripcion}</b><small>{item.fecha} · {item.partida} · {item.canal}</small></span><strong>{money(item.importe)}</strong><em className={String(item.estadoAprobacion).toLowerCase()}>{item.estadoAprobacion || "PENDIENTE"}</em></div>)}{!expenses.length && <p>Sin gastos registrados esta semana.</p>}</article></section>
     </section>;
 }
-function Collections({ rows, clients, loading, load, call, notify }: {
+function Collections({ rows, clients, loading, load, call, notify, canUploadReceipt }: {
     rows: Order[];
     clients: Client[];
     loading: boolean;
     load: () => Promise<void>;
     call: <T>(f: string, a?: unknown[]) => Promise<T>;
     notify: (s: string) => void;
+    canUploadReceipt: boolean;
 }) {
     const [routeTab, setRouteTab] = useState("JORNADA Y RENDICIÓN");
     const [expenseOpen, setExpenseOpen] = useState(() => cacheGet<string>("nexo_rendition_view", "NUEVA_RENDICION") !== "RESUMEN");
@@ -1494,7 +1531,8 @@ function Collections({ rows, clients, loading, load, call, notify }: {
     const [closingJourney, setClosingJourney] = useState(false);
     const [cashDelivered, setCashDelivered] = useState(0);
     const [journeyObservation, setJourneyObservation] = useState("");
-    const [expense, setExpense] = useState({ solicitudId: crypto.randomUUID(), fecha: today(), partida: "COMBUSTIBLE", descripcion: "", importe: 0, canal: "EFECTIVO", ruta: "JORNADA ACTUAL", unidad: "", observacion: "", origenDinero: "FONDO DE RUTA" });
+    const [expense, setExpense] = useState(() => cacheGet(`nexo_rendition_expense_draft:${cacheGet<Session | null>("nexoventa_session", null)?.usuario || "local"}`, { solicitudId: crypto.randomUUID(), fecha: today(), partida: "COMBUSTIBLE", descripcion: "", importe: 0, canal: "EFECTIVO", ruta: "JORNADA ACTUAL", unidad: "", observacion: "", origenDinero: "FONDO DE RUTA", proveedor: "", tipoComprobante: "TICKET" }));
+    const [receiptFile, setReceiptFile] = useState<File | null>(null);
     const acceptBudgetCategories = useCallback((values: string[]) => {
         setBudgetCategories(values);
         if (values.length) setExpense(current => values.includes(current.partida) ? current : { ...current, partida: values[0] });
@@ -1598,20 +1636,48 @@ function Collections({ rows, clients, loading, load, call, notify }: {
     const journeyDetailTitle = journeyDetail === "POR COBRAR" ? "Deudores de la jornada" : journeyDetail === "URGENTE" ? "Cobranza urgente" : journeyDetail === "GASTOS PENDIENTES" ? "Gastos pendientes de aprobación" : journeyDetail === "GASTOS" ? "Gastos de ruta" : journeyDetail || "Detalle de jornada";
     const tabRows = routeTab === "EN RUTA" ? routeRows : routeTab === "ENTREGADOS" ? deliveredRows : routeTab === "PENDIENTES DE COBRO" ? pendingRows : routeTab === "COBRANZA URGENTE" || routeTab === "VENCIDOS" ? overdueRows : [];
     const findClient = (name: string) => clients.find(c => `${c.nombre} ${c.apellidos}`.trim().toLowerCase() === name.trim().toLowerCase());
+    async function uploadReceipt(file: File) {
+        let prepared = file;
+        if (file.type.startsWith("image/") && typeof createImageBitmap === "function") {
+            try {
+                const bitmap = await createImageBitmap(file);
+                const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+                const canvas = document.createElement("canvas");
+                canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+                const context = canvas.getContext("2d");
+                if (context) {
+                    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/jpeg", .82));
+                    if (blob) prepared = new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "comprobante"}.jpg`, { type: "image/jpeg" });
+                }
+                bitmap.close();
+            } catch { /* Keep the original file if the browser cannot resize it. */ }
+        }
+        if (prepared.size > 2_500_000) throw new Error("El comprobante supera 2.5 MB. Elige un archivo más liviano.");
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "")); reader.onerror = () => reject(new Error("No se pudo leer el comprobante.")); reader.readAsDataURL(prepared);
+        });
+        const base64 = dataUrl.split(",")[1] || "";
+        const uploaded = await call<{ path: string }>("subirComprobanteGasto", [{ nombre: prepared.name, tipo: prepared.type, base64 }]);
+        return uploaded.path;
+    }
     async function saveExpense(e: FormEvent) {
         e.preventDefault();
         if (savingExpense || !(expense.importe > 0) || !expense.partida)
             return notify("Indica categoría e importe válido.");
         setSavingExpense(true);
         try {
-            await call<string>("registrarGastoOperacion", [{ ...expense, descripcion: `${expense.descripcion} · ${expense.origenDinero}`.trim() }]);
+            const comprobanteUrl = receiptFile ? await uploadReceipt(receiptFile) : "";
+            await call<string>("registrarGastoOperacion", [{ ...expense, comprobanteUrl, subcategoria: expense.tipoComprobante, proveedor: expense.proveedor, descripcion: `${expense.descripcion} · ${expense.origenDinero}`.trim() }]);
             const registered = { partida: expense.partida, importe: expense.importe };
             setExpenseOpen(false);
             cacheSet("nexo_rendition_view", "RESUMEN");
             setExpenseSuccess(registered);
             setExpenseRefresh(value => value + 1);
-            setExpense({ solicitudId: crypto.randomUUID(), fecha: today(), partida: budgetCategories[0] || "COMBUSTIBLE", descripcion: "", importe: 0, canal: "EFECTIVO", ruta: "JORNADA ACTUAL", unidad: "", observacion: "", origenDinero: "FONDO DE RUTA" });
-            notify("Registro exitoso · pendiente de aprobación");
+            setExpense({ solicitudId: crypto.randomUUID(), fecha: today(), partida: budgetCategories[0] || "COMBUSTIBLE", descripcion: "", importe: 0, canal: "EFECTIVO", ruta: "JORNADA ACTUAL", unidad: "", observacion: "", origenDinero: "FONDO DE RUTA", proveedor: "", tipoComprobante: "TICKET" });
+            setReceiptFile(null);
+            localStorage.removeItem(`nexo_rendition_expense_draft:${cacheGet<Session | null>("nexoventa_session", null)?.usuario || "local"}`);
+            notify("Rendición enviada correctamente · pendiente de aprobación");
             void loadJourney();
         }
         catch (x) {
@@ -1633,10 +1699,10 @@ function Collections({ rows, clients, loading, load, call, notify }: {
         finally { setClosingJourney(false); }
     }
     if (routeTab === "JORNADA Y RENDICIÓN") return <div className="route-module weekly-route-module">
-        <Heading eyebrow="RENDICIÓN" title="Control semanal de gastos y caja" text="El proyectado proviene del presupuesto mensual de Gestión financiera."/>
+        <Heading eyebrow="RENDICIÓN" title="Rendición" text="Registra gastos y viáticos de la jornada. El presupuesto proviene de Gestión financiera."/>
         <nav className="route-tabs">{["EN RUTA", "ENTREGADOS", "PENDIENTES DE COBRO", "COBRANZA URGENTE", "JORNADA Y RENDICIÓN"].map(tab => <button className={routeTab === tab ? "active" : ""} key={tab} onClick={() => { setRouteTab(tab); cacheSet("nexo_route_tab", tab); }}>{tab}<b>{tab === "EN RUTA" ? routeRows.length : tab === "ENTREGADOS" ? deliveredRows.length : tab === "PENDIENTES DE COBRO" ? pendingRows.length : tab === "COBRANZA URGENTE" ? overdueRows.length : ""}</b></button>)}</nav>
         <div hidden={expenseOpen}><WeeklyRendition call={call} notify={notify} onRegisterExpense={() => { cacheSet("nexo_rendition_view", "NUEVA_RENDICION"); setExpenseOpen(true); }} onClose={() => setCloseJourneyOpen(true)} onBudgetCategories={acceptBudgetCategories} refreshKey={expenseRefresh}/></div>
-        {expenseOpen && <StitchExpense value={expense} onChange={setExpense} categories={budgetCategories} saving={savingExpense} onSubmit={saveExpense} onCancel={() => { cacheSet("nexo_rendition_view", "RESUMEN"); setExpenseOpen(false); }}/>}
+        {expenseOpen && <div className="sx-rendition-screen"><button className="sx-rendition-jornada" type="button" onClick={() => { cacheSet("nexo_rendition_view", "RESUMEN"); setExpenseOpen(false); }}>JORNADA</button><StitchExpense value={expense} onChange={setExpense} categories={budgetCategories} saving={savingExpense} onSubmit={saveExpense} canUploadReceipt={canUploadReceipt} receiptFile={receiptFile} onReceiptChange={setReceiptFile} recent={journeyExpenses.slice(0, 3)} onSaveDraft={() => { cacheSet(`nexo_rendition_expense_draft:${cacheGet<Session | null>("nexoventa_session", null)?.usuario || "local"}`, expense); cacheSet("nexo_rendition_view", "RESUMEN"); setExpenseOpen(false); notify("Borrador de rendición guardado en este dispositivo."); }} /></div>}
         {closeJourneyOpen && <div className="modal-bg route-modal-bg" onMouseDown={event => { if (event.target === event.currentTarget && !closingJourney) setCloseJourneyOpen(false); }}><section className="journey-close-modal"><header><div><small>CIERRE OPERATIVO</small><h2>Cerrar jornada de hoy</h2></div><button onClick={() => setCloseJourneyOpen(false)}>×</button></header><div><span>Gastos registrados <b>{money(journey?.gastos.total)}</b></span><span>Efectivo esperado <b>{money(journey?.efectivoEsperado)}</b></span><label>Efectivo entregado<input type="number" min="0" step=".01" value={cashDelivered || ""} onChange={event => setCashDelivered(Number(event.target.value))}/></label><strong>Diferencia <b>{money(cashDifference)}</b></strong>{Math.abs(cashDifference) > .01 && <label>Observación requerida<textarea value={journeyObservation} onChange={event => setJourneyObservation(event.target.value)}/></label>}</div><footer><button onClick={() => setCloseJourneyOpen(false)}>Cancelar</button><button className="primary" disabled={closingJourney || (Math.abs(cashDifference) > .01 && !journeyObservation.trim())} onClick={closeJourney}>{closingJourney ? "Cerrando…" : "Confirmar cierre"}</button></footer></section></div>}
         {expenseSuccess && <div className="expense-success" role="dialog" aria-modal="true"><section><span>✓</span><small>GASTO REGISTRADO</small><h2>Registro exitoso</h2><strong>{money(expenseSuccess.importe)}</strong><p>{expenseSuccess.partida}</p><em>Pendiente de aprobación en Gestión financiera</em><button className="primary" onClick={() => setExpenseSuccess(null)}>Entendido</button></section></div>}
     </div>;

@@ -357,12 +357,34 @@ export async function registerNativeExpense(userId: string, payload: ExpensePayl
   return "Gasto registrado. Pendiente de aprobación financiera.";
 }
 
+export async function uploadNativeExpenseProof(userId: string, payload: { nombre?: string; tipo?: string; base64?: string }) {
+  const type = String(payload.tipo || "").toLowerCase();
+  const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" };
+  const extension = extensions[type];
+  const encoded = String(payload.base64 || "");
+  if (!extension || !encoded || encoded.length > 3_500_000) throw new Error("El comprobante debe ser JPG, PNG, WEBP o PDF y no superar 2.5 MB.");
+  const bytes = Buffer.from(encoded, "base64");
+  if (!bytes.length || bytes.length > 2_500_000) throw new Error("El comprobante supera el límite de 2.5 MB.");
+  const path = `${userId}/${crypto.randomUUID()}.${extension}`;
+  const { error } = await getSupabaseAdminClient().storage.from("comprobantes").upload(path, bytes, { contentType: type, upsert: false });
+  if (error) throw error;
+  return { path };
+}
+
 export async function getNativeExpenses(date: unknown = limaToday(), pendingOnly = false) {
   let query = getSupabaseAdminClient().from("gastos").select("*").order("created_at", { ascending: false });
   if (date !== "*") query = query.eq("fecha", String(date || limaToday()));
   if (pendingOnly) query = query.in("estado", ["PENDIENTE_APROBACION", "OBSERVADO"]);
   const { data, error } = await query; if (error) throw error;
-  return (data || []).map(row => ({ solicitudId: row.id, id: row.id, fecha: row.fecha, responsable: row.repartidor_id || row.usuario_id || "", usuario: row.usuario_id || "", ruta: "", unidad: "", partida: row.categoria, descripcion: row.descripcion, importe: number(row.monto), canal: row.medio_pago || "", comprobanteUrl: row.comprobante_url || "", observacion: "", estadoRendicion: row.estado, estadoAprobacion: row.estado.replace("PENDIENTE_APROBACION", "PENDIENTE"), observacionAdministracion: "", origenDinero: row.origen_dinero || "", proveedor: row.proveedor || "", jornadaId: row.jornada_id || "" }));
+  return Promise.all((data || []).map(async row => {
+    const storedProof = String(row.comprobante_url || "");
+    let comprobanteUrl = storedProof;
+    if (storedProof && !/^https?:\/\//i.test(storedProof)) {
+      const { data: signed } = await getSupabaseAdminClient().storage.from("comprobantes").createSignedUrl(storedProof, 3600);
+      comprobanteUrl = signed?.signedUrl || "";
+    }
+    return { solicitudId: row.id, id: row.id, fecha: row.fecha, responsable: row.repartidor_id || row.usuario_id || "", usuario: row.usuario_id || "", ruta: "", unidad: "", partida: row.categoria, descripcion: row.descripcion, importe: number(row.monto), canal: row.medio_pago || "", comprobanteUrl, observacion: "", estadoRendicion: row.estado, estadoAprobacion: row.estado.replace("PENDIENTE_APROBACION", "PENDIENTE"), observacionAdministracion: "", origenDinero: row.origen_dinero || "", proveedor: row.proveedor || "", jornadaId: row.jornada_id || "" };
+  }));
 }
 
 export async function resolveNativeExpense(userId: string, payload: ExpensePayload) {

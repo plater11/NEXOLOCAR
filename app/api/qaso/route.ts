@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { dataSourceMode, isSupabaseConfigured } from "../../../lib/supabase/config";
 import { compareResult, executeCompatRead, mirrorClientMutation, mirrorProductMutation, mirrorSaleMutation, SUPABASE_CLIENT_MUTATIONS, SUPABASE_COMPAT_READS, SUPABASE_ORDER_MUTATIONS, SUPABASE_PRODUCT_MUTATIONS } from "../../../lib/supabase/compat";
 import { createSupabaseUser, deleteSupabaseUser, listSupabaseUsers, loginSupabase, logoutSupabase, requireSupabaseSession, updateSupabaseUser, type UserPayload } from "../../../lib/supabase/auth";
-import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, closeNativeOperationalPeriod, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeBulkStockTemplate, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeFinanceSnapshot, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, getNativeStockBatches, importNativeBulkStock, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, revertNativeStockBatch, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState, validateNativeBulkStock } from "../../../lib/supabase/operations";
+import { assignNativeJourney, bulkNativeOrders, closeNativeJourney, closeNativeOperationalPeriod, correctNativeOrder, createNativeSale, deleteNativeClient, deleteNativeProduct, duplicateNativePlan, getNativeAccounting, getNativeAnalysis, getNativeBulkStockTemplate, getNativeCollections, getNativeCurve, getNativeExpenses, getNativeFinanceSnapshot, getNativeInventoryHistory, getNativeJourneySummary, getNativeLists, getNativeOrderHistory, getNativePlan, getNativePreparation, getNativePurchaseConsolidation, getNativeRendition, getNativeStockBatches, importNativeBulkStock, issueNativePrintCode, processNativeCollection, registerNativeExpense, registerNativeInventoryMovement, resolveNativeExpense, revertNativeStockBatch, saveNativeAccounting, saveNativeClient, saveNativeFinancialMovement, saveNativePlan, saveNativePreparation, saveNativeProduct, updateNativeOrderState, uploadNativeExpenseProof, validateNativeBulkStock } from "../../../lib/supabase/operations";
 
 const ALLOWED = new Set([
   "loginUsuario", "obtenerSesion", "cerrarSesion", "obtenerResumen", "cerrarPeriodoOperativo", "obtenerCatalogoProductos",
@@ -12,7 +12,7 @@ const ALLOWED = new Set([
   "obtenerEmisiones", "generarCodigoImpresion", "obtenerCobranzaPedidos", "guardarCobranzaPedido",
   "corregirPedido", "actualizarEstadoOperativoPedido", "obtenerHistorialEstadosPedido",
   "obtenerPreparacionPedido", "guardarPreparacionPedido", "asignarPedidoJornada", "obtenerConsolidadoCompra", "actualizarPedidosMasivo", "obtenerActividadReciente",
-  "registrarGastoOperacion", "obtenerGastosOperacion", "obtenerGastosPendientes", "resolverGastoOperacion",
+  "registrarGastoOperacion", "obtenerGastosOperacion", "obtenerGastosPendientes", "resolverGastoOperacion", "subirComprobanteGasto",
   "obtenerResumenJornada", "cerrarJornada", "obtenerRendicionDia", "validarRendicionDia",
   "registrarMovimientoFinanciero", "obtenerCentroGerencial", "obtenerResumenFinanciero", "guardarPlaneamientoMensual", "duplicarPlaneamientoMensualAnterior",
   "obtenerPlaneamientoMensual", "guardarContabilidadDiaria", "obtenerContabilidadDiaria", "obtenerCurvaS",
@@ -30,6 +30,12 @@ export async function POST(request: Request) {
     const body = await request.json() as { fn?: string; args?: unknown[]; token?: string };
     if (!body.fn || !ALLOWED.has(body.fn)) return NextResponse.json({ ok: false, message: "Operación no permitida." }, { status: 403 });
     const mode = dataSourceMode();
+    if (body.fn === "subirComprobanteGasto") {
+      if (mode === "sheets" || !isSupabaseConfigured()) return NextResponse.json({ ok: false, message: "La carga de comprobantes requiere almacenamiento Supabase." }, { status: 503 });
+      const current = await requireSupabaseSession(String(body.token || ""));
+      const result = await uploadNativeExpenseProof(current.user.id, (body.args?.[0] || {}) as { nombre?: string; tipo?: string; base64?: string });
+      return NextResponse.json({ ok: true, resultado: result });
+    }
     if (mode === "supabase" && isSupabaseConfigured()) {
       try {
         if (body.fn === "loginUsuario") return NextResponse.json({ ok: true, resultado: await loginSupabase(body.args?.[0], body.args?.[1]) });
