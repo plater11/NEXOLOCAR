@@ -30,3 +30,30 @@ html:has(.sx-sales){scrollbar-gutter:stable}
 .sx-draft-list h3,.sx-draft-list p{margin:0}.sx-draft-list h3{font-size:16px}.sx-draft-list p{font-size:12px;color:#64748b}
 .sx-draft-list button{min-height:44px;border:0;border-radius:10px;background:#be5600;color:white;cursor:pointer}
 @media(max-width:900px){.sx-sales .sx-cart-launch{left:12px;right:12px;width:auto;bottom:calc(12px + env(safe-area-inset-bottom))}.sx-sales-tabs{display:grid;grid-template-columns:1fr 1fr}.sx-sales .sx-catalogue{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sx-sales,.sx-sales-header,.sx-sales-toolbar,.sx-draft-list{min-width:0;max-width:100%;width:100%;box-sizing:border-box}
+.sx-draft-list article{min-width:0;overflow-wrap:anywhere}
+.sx-draft-list article>strong{font-size:18px;color:#111c2d}
+.sx-expense-screen{width:min(100%,900px);margin-inline:auto;display:grid;gap:12px}
+.sx-expense-screen .sx-expense-fields{display:grid;gap:12px;min-width:0}
+.sx-expense-status{display:inline-flex;align-items:center;min-height:30px;padding:0 10px;border-radius:999px;background:#eaf7f0;color:#087443;font-size:12px;font-weight:600}
+.sx-expense-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sx-expense-section-title label,.sx-expense-section-title h3{margin:0;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#475569}
+.sx-expense-section-title>span{padding:5px 8px;border-radius:6px;background:#fff0e4;color:#974300;font-size:11px;font-weight:600;white-space:nowrap}
+.sx-expense-amount-row{display:grid;grid-template-columns:minmax(130px,1fr) auto;gap:10px;align-items:center;margin-top:8px}
+.sx-expense-screen .sx-money-input{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 12px;border-radius:10px;background:#f0f3ff}
+.sx-expense-screen .sx-money-input>span{font-size:18px;font-weight:800;color:#974300}
+.sx-expense-screen .sx-money-input input{min-height:44px;min-width:0;width:100%;border:0;background:transparent;font-size:20px;font-weight:800;color:#111c2d}
+.sx-expense-quick{display:flex;gap:6px}
+.sx-expense-quick button{min-height:38px;padding:0 10px;border:0;border-radius:8px;background:#f0f3ff;color:#334155;font-weight:600}
+.sx-expense-quick button.selected{background:#ffdbc9;color:#763300}
+.sx-expense-category .sx-choice-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.sx-expense-category .sx-choice-grid button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;min-width:0;padding:8px;border:0;border-radius:9px;background:#f0f3ff;color:#334155;font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.sx-expense-category .sx-choice-grid button.selected{background:#974300;color:#fff}
+.sx-expense-category .sx-help{margin:8px 0 0;color:#64748b;font-size:12px}
+.sx-expense-details{display:grid;gap:12px}
+.sx-expense-details label{display:grid;gap:6px;color:#475569;font-size:12px;font-weight:600}
+.sx-expense-details input,.sx-expense-details select,.sx-expense-details textarea{width:100%;min-width:0;min-height:44px;box-sizing:border-box;padding:10px 12px;border:1px solid #dbe3ee;border-radius:9px;background:#fff;color:#111c2d;font-size:14px}
+.sx-expense-details textarea{min-height:84px;resize:vertical}
+.sx-expense-screen .sx-alert{margin:0;padding:12px;border-radius:10px;background:#fff5e5;color:#92520a;font-size:13px}
+.sx-expense-submit{width:100%;min-height:48px}
+@media(max-width:600px){.sx-sales{padding-bottom:calc(96px + env(safe-area-inset-bottom))}.sx-sales-header .sx-heading{align-items:flex-start}.sx-sales-tabs{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.sx-sales-tabs button{min-width:0;white-space:normal;line-height:1.25}.sx-sales-tools{width:100%;justify-content:space-between}.sx-draft-list{grid-template-columns:minmax(0,1fr);gap:10px}.sx-draft-list article{padding:14px}.sx-expense-amount-row{grid-template-columns:minmax(0,1fr);gap:8px}.sx-expense-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}.sx-expense-quick button{min-width:0;padding:0 4px}.sx-expense-category .sx-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sx-expense-status{font-size:11px}.sx-expense-screen .sx-heading{flex-wrap:wrap}}
